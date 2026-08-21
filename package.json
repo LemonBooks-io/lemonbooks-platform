@@ -1,0 +1,32 @@
+{
+  "name": "lemonbooks",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Financial operations and reconciliation for emerging-market businesses.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "infra:up": "docker compose up -d postgres",
+    "infra:down": "docker compose down",
+    "dev": "concurrently -n api,web -c yellow,green \"npm run dev -w @lemonbooks/api\" \"npm run dev -w @lemonbooks/web\"",
+    "dev:api": "npm run dev -w @lemonbooks/api",
+    "dev:web": "npm run dev -w @lemonbooks/web",
+    "build": "npm run build -ws --if-present",
+    "typecheck": "npm run typecheck -ws --if-present",
+    "lint": "npm run lint -ws --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "overrides": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

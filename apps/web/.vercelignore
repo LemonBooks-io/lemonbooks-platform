@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+.git-history/
+legacy/
+node_modules/
+dist/
+coverage/
+.api/
+*.log
+*.tsbuildinfo

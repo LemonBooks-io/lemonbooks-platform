@@ -1,0 +1,3 @@
+name,description,cost,currency,category,type,billingCycleUnit,billingCycleDuration,serviceCycleUnit,serviceCycleDuration
+Sample Service,This is a sample service (optional),200,KWD,Subscription,SERVICE,1,MONTH,1,YEAR
+Sample Product,This is a sample product (optional),100,KWD,Hardware,PRODUCT,,,,

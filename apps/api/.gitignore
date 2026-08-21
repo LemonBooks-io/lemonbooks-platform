@@ -1,0 +1,9 @@
+.env
+node_modules
+env.example
+request.http
+package.lock.json
+frontend-demo
+
+build
+.vscode

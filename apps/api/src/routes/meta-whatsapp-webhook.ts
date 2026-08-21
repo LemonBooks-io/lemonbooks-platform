@@ -1,0 +1,57 @@
+import crypto from "node:crypto";
+import type { NextFunction, Request, Response } from "express";
+import { env } from "../config";
+import { query, transaction } from "../database/pool";
+import { HttpError } from "../http";
+import { extractBusinessSignals } from "../services/whatsapp.service";
+
+export function metaWebhookVerification(req: Request, res: Response) {
+  if (!env.whatsapp.verifyToken || String(req.query["hub.verify_token"] ?? "") !== env.whatsapp.verifyToken) return res.sendStatus(403);
+  return res.status(200).send(String(req.query["hub.challenge"] ?? ""));
+}
+
+export async function metaWebhookReceiver(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!env.whatsapp.appSecret || !req.rawBody) throw new HttpError(503, "WhatsApp webhook is not configured");
+    const supplied = String(req.headers["x-hub-signature-256"] ?? "").replace(/^sha256=/, "");
+    const expected = crypto.createHmac("sha256", env.whatsapp.appSecret).update(req.rawBody).digest("hex");
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) throw new HttpError(401, "Invalid WhatsApp signature");
+    for (const entry of req.body?.entry ?? []) for (const change of entry.changes ?? []) {
+      const value = change.value ?? {};
+      const phoneId = String(value.metadata?.phone_number_id ?? "");
+      const connection = (await query<Record<string, unknown>>("SELECT * FROM integration_connections WHERE provider='meta_whatsapp' AND environment='production' AND external_account_id=$1 AND status='active' AND deleted_at IS NULL", [phoneId]))[0];
+      if (!connection) continue;
+      for (const message of value.messages ?? []) await ingestMessage(connection, message, value.contacts?.[0]);
+      for (const status of value.statuses ?? []) await ingestStatus(connection, status);
+    }
+    res.sendStatus(200);
+  } catch (error) { next(error); }
+}
+
+async function ingestMessage(connection: Record<string, any>, message: Record<string, any>, profile?: Record<string, any>) {
+  const providerEventId = `message:${message.id}`;
+  const occurredAt = new Date(Number(message.timestamp) * 1000);
+  const body = String(message.text?.body ?? message.button?.text ?? message.interactive?.button_reply?.title ?? "");
+  await transaction(async client => {
+    const event = (await client.query<Record<string, any>>(`INSERT INTO integration_events(business_id,connection_id,provider,environment,provider_event_id,event_type,payload_hash,raw_payload,signature_valid,occurred_at,status,processed_at) VALUES($1,$2,'meta_whatsapp','production',$3,'messages',$4,$5,true,$6,'processed',now()) ON CONFLICT(provider,environment,provider_event_id) DO NOTHING RETURNING id`, [connection.business_id, connection.id, providerEventId, crypto.createHash("sha256").update(JSON.stringify(message)).digest("hex"), JSON.stringify(message), occurredAt])).rows[0];
+    if (!event) return;
+    const phone = `+${String(message.from ?? "").replace(/\D/g, "")}`;
+    const signals = extractBusinessSignals(body);
+    const clientMatch = (await client.query<Record<string, any>>("SELECT id FROM clients WHERE business_id=$1 AND regexp_replace(COALESCE(phone,''),'[^0-9]','','g')=regexp_replace($2,'[^0-9]','','g') AND deleted_at IS NULL LIMIT 1", [connection.business_id, phone])).rows[0];
+    const contact = (await client.query<Record<string, any>>(`INSERT INTO whatsapp_contacts(business_id,connection_id,client_id,provider_contact_id,phone_e164,display_name,consent_state,consent_source,consented_at,last_inbound_at,service_window_expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,'customer_initiated',CASE WHEN $7='opted_in' THEN now() END,$8,$8+interval '24 hours') ON CONFLICT(connection_id,phone_e164) DO UPDATE SET client_id=COALESCE(whatsapp_contacts.client_id,EXCLUDED.client_id),display_name=COALESCE(EXCLUDED.display_name,whatsapp_contacts.display_name),consent_state=CASE WHEN whatsapp_contacts.consent_state='opted_out' THEN 'opted_out' ELSE EXCLUDED.consent_state END,last_inbound_at=$8,service_window_expires_at=$8+interval '24 hours',updated_at=now() RETURNING *`, [connection.business_id, connection.id, clientMatch?.id ?? null, message.from, phone, profile?.profile?.name ?? null, signals.optOut ? "opted_out" : "opted_in", occurredAt])).rows[0]!;
+    if (signals.optOut) await client.query("UPDATE whatsapp_contacts SET opted_out_at=now() WHERE id=$1", [contact.id]);
+    const conversation = (await client.query<Record<string, any>>(`INSERT INTO whatsapp_conversations(business_id,connection_id,contact_id,state,last_inbound_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(connection_id,contact_id) DO UPDATE SET state=EXCLUDED.state,last_inbound_at=$5,updated_at=now() RETURNING *`, [connection.business_id, connection.id, contact.id, signals.optOut ? "blocked" : "awaiting_business", occurredAt])).rows[0]!;
+    await client.query(`INSERT INTO whatsapp_messages(business_id,conversation_id,provider_message_id,direction,message_type,body,provider_status,occurred_at) VALUES($1,$2,$3,'inbound',$4,$5,'received',$6) ON CONFLICT(business_id,provider_message_id) DO NOTHING`, [connection.business_id, conversation.id, message.id, message.type ?? "text", body, occurredAt]);
+    await client.query("UPDATE integration_connections SET last_success_at=now(),last_error_code=NULL,updated_at=now() WHERE id=$1", [connection.id]);
+  });
+}
+
+async function ingestStatus(connection: Record<string, any>, status: Record<string, any>) {
+  const eventId = `status:${status.id}:${status.status}:${status.timestamp}`;
+  await transaction(async client => {
+    const event = (await client.query(`INSERT INTO integration_events(business_id,connection_id,provider,environment,provider_event_id,event_type,payload_hash,raw_payload,signature_valid,occurred_at,status,processed_at) VALUES($1,$2,'meta_whatsapp','production',$3,'message_status',$4,$5,true,to_timestamp($6),'processed',now()) ON CONFLICT(provider,environment,provider_event_id) DO NOTHING RETURNING id`, [connection.business_id, connection.id, eventId, crypto.createHash("sha256").update(JSON.stringify(status)).digest("hex"), JSON.stringify(status), Number(status.timestamp)])).rows[0];
+    if (!event) return;
+    await client.query("UPDATE whatsapp_messages SET provider_status=$1 WHERE business_id=$2 AND provider_message_id=$3", [String(status.status ?? "unknown"), connection.business_id, status.id]);
+    await client.query("UPDATE integration_connections SET last_success_at=now(),last_error_code=NULL,updated_at=now() WHERE id=$1", [connection.id]);
+  });
+}

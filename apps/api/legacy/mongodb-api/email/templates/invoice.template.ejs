@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice from LemonBooks</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      line-height: 1.6;
+      color: #1f2937;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    .email-container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+      color: white;
+      padding: 40px 30px;
+      text-align: center;
+      position: relative;
+    }
+
+    .header::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="0.5"/></pattern></defs><rect width="100" height="100" fill="url(%23grid)"/></svg>');
+      opacity: 0.3;
+    }
+
+    .header-content {
+      position: relative;
+      z-index: 1;
+    }
+
+    .logo {
+      font-size: 36px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.02em;
+    }
+
+    .header-subtitle {
+      font-size: 18px;
+      opacity: 0.9;
+      font-weight: 500;
+    }
+
+    .invoice-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.15);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      margin-top: 20px;
+      backdrop-filter: blur(10px);
+    }
+
+    .content {
+      padding: 40px 30px;
+    }
+
+    .greeting {
+      font-size: 20px;
+      font-weight: 600;
+      color: #111827;
+      margin-bottom: 16px;
+    }
+
+    .intro-text {
+      font-size: 16px;
+      color: #6b7280;
+      margin-bottom: 32px;
+      line-height: 1.7;
+    }
+
+    /* SIMPLE INVOICE DETAILS */
+    .invoice-details {
+      margin: 24px 0;
+    }
+
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding: 8px 0;
+    }
+
+    .detail-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .detail-label {
+      font-weight: 500;
+      color: #374151;
+      font-size: 15px;
+    }
+
+    .detail-value {
+      font-weight: 600;
+      color: #111827;
+      font-size: 15px;
+    }
+
+    /* CLEAN TABLE FOR ITEMS */
+    .items-section {
+      margin: 32px 0;
+    }
+
+    .items-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #111827;
+      margin-bottom: 16px;
+    }
+
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid #d1d5db;
+    }
+
+    .items-table th {
+      background: #2867dd;
+      color: white;
+      padding: 12px 16px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .items-table th.text-center {
+      text-align: center;
+    }
+
+    .items-table th.text-right {
+      text-align: right;
+    }
+
+    .items-table td {
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e7eb;
+      font-size: 14px;
+      color: #374151;
+    }
+
+    .items-table td.text-center {
+      text-align: center;
+    }
+
+    .items-table td.text-right {
+      text-align: right;
+    }
+
+    .items-table tr:nth-child(even) {
+      background-color: #f9fafb;
+    }
+
+    .items-table tr:last-of-type td {
+      border-bottom: none;
+    }
+
+    .item-name {
+      font-weight: 500;
+      color: #111827;
+    }
+
+    .subtotal-row {
+      background: white !important;
+    }
+
+    .subtotal-row td {
+      font-weight: 600;
+      padding: 16px;
+      border-top: 2px solid #d1d5db;
+    }
+
+    .total-row {
+      background: #2867dd !important;
+    }
+
+    .total-row td {
+      color: white;
+      font-weight: 700;
+      font-size: 16px;
+      padding: 16px;
+    }
+
+    .payment-section {
+      margin: 32px 0;
+      text-align: center;
+    }
+
+    .payment-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #111827;
+      margin-bottom: 16px;
+    }
+
+    .payment-link {
+      display: inline-block;
+      background: white;
+      color: #2867dd;
+      text-decoration: none;
+      padding: 12px 32px;
+      font-weight: 500;
+      font-size: 15px;
+      margin: 0 8px 8px 0;
+      border-radius: 8px;
+      border: #2867dd 0.5px solid;
+    }
+
+    .onboard-section {
+      background: linear-gradient(135deg, #fefbeb 0%, #fef3c7 100%);
+      border: 2px solid #fed7aa;
+      border-radius: 12px;
+      padding: 24px;
+      margin: 24px 0;
+      text-align: center;
+    }
+
+    .onboard-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #92400e;
+      margin-bottom: 12px;
+    }
+
+    .onboard-text {
+      font-size: 14px;
+      color: #a16207;
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+
+    .onboard-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+      color: white;
+      text-decoration: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      box-shadow: 0 4px 14px rgba(245, 158, 11, 0.4);
+    }
+
+    .help-section {
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 24px 0;
+      text-align: center;
+    }
+
+    .help-text {
+      color: #6b7280;
+      font-size: 15px;
+      margin-bottom: 8px;
+    }
+
+    .contact-link {
+      color: #3b82f6;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .contact-link:hover {
+      text-decoration: underline;
+    }
+
+    .footer {
+      background: #111827;
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+
+    .footer-brand {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #ffffff;
+    }
+
+    .footer-text {
+      color: #9ca3af;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+
+    .divider {
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #e5e7eb, transparent);
+      margin: 24px 0;
+    }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      body {
+        padding: 10px;
+      }
+      
+      .email-container {
+        border-radius: 12px;
+      }
+      
+      .header, .content, .footer {
+        padding: 24px 20px;
+      }
+
+      .detail-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        margin-bottom: 16px;
+      }
+
+      .items-table {
+        font-size: 14px;
+      }
+
+      .items-table th,
+      .items-table td {
+        padding: 12px 8px;
+      }
+
+      .payment-link {
+        display: block;
+        margin: 8px 0;
+        width: 100%;
+        max-width: 250px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="email-container">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-content">
+        <div class="logo"><%= body.businessName %></div>
+        <% if (body.type === 'invoice') { %>
+        <div class="header-subtitle" id="headerSubtitle">Invoice Ready</div>
+        <% } else { %>
+        <div class="header-subtitle" id="headerSubtitle">Estimate Ready</div>
+        <% } %>
+        <div class="invoice-badge">
+          📄 Document Generated
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="content">
+      <div class="greeting">
+        Hello <%= body.name %>! 👋
+      </div>
+      
+      <div class="intro-text">
+        A new <span style="text-transform: lowercase;"><%= body.type %></span> has been created for you. Please review the details below and proceed with the next steps.
+      </div>
+
+      <!-- Simple Invoice Details -->
+      <div class="invoice-details">
+        <div class="detail-row">
+          <div class="detail-label">Invoice Number:</div>
+          <div class="detail-value"><%= body.invoiceNumber %></div>
+        </div>
+        
+        <div class="detail-row">
+          <div class="detail-label">Due Date:</div>
+          <div class="detail-value"><%= body.due %></div>
+        </div>
+      </div>
+
+      <!-- Items Table -->
+      <div class="items-section">
+        <div class="items-title">Items & Services</div>
+        
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th class="text-center">Qty</th>
+              <th class="text-right">Price</th>
+              <th class="text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (body.items && body.items.length > 0) { %>
+              <% body.items.forEach(function(item) { %>
+                <tr>
+                  <td>
+                    <div class="item-name"><%= item.name %></div>
+                  </td>
+                  <td class="text-center"><%= item.quantity %></td>
+                  <td class="text-right"><%= item.unitPrice || item.amount %></td>
+                  <td class="text-right"><%= item.amount %></td>
+                </tr>
+              <% }); %>
+            <% } %>
+
+            
+            <!-- Total Row -->
+            <tr class="total-row">
+              <td colspan="3" class="text-right">Total:</td>
+              <td class="text-right"><%= body.amount %> <%= body.currency %></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <% if (body.type === 'invoice') { %>
+        <!-- Payment Section -->
+        <div class="payment-section">
+          <div class="payment-title">Payment Options</div>
+          <% if (body.tapInvoiceUrl) { %>
+            <a href="<%= body.tapInvoiceUrl %>" class="payment-link">💳 Pay with Card</a>
+          <% } %>
+          <a href="<%= body.customPaymentUrl %>" class="payment-link">💸 Pay with bank or transfer</a>
+        </div>
+      <% } %>
+
+      <div class="divider"></div>
+
+      <!-- Onboarding Section -->
+      <div class="onboard-section">
+        <div class="onboard-title">🚀 Manage Your Account</div>
+        <div class="onboard-text">
+          Efficiently manage your invoices, estimates, and previous payments through our comprehensive platform.
+        </div>
+        <a href="<%= body.onboardUrl %>" class="onboard-btn">
+          📊 Access Platform
+        </a>
+      </div>
+
+      <!-- Help Section -->
+      <div class="help-section">
+        <div class="help-text">
+          Need assistance or have questions?
+        </div>
+        <div>
+          <a href="mailto:support@lemonbooks.app" class="contact-link">Contact our support team</a>
+        </div>
+      </div>
+
+      <div class="intro-text" style="margin-top: 24px; margin-bottom: 0;">
+        Thank you for your business! We appreciate your prompt attention to this <%= body.type %>.
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <div class="footer-brand"><%= body.businessName %></div>
+      <div class="footer-text">© 2025 LemonBooks. All rights reserved.</div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,3 @@
+firstName,lastName,email,address,company,countryCode,number,city,state,amount,description
+Jane,Doe,janedoe@email.com,Jane doe address,Jane Company,1,123456789,Jane City,Jane State,2000,Balance transferred from zoho
+John,Doe,johndow@email.com,John doe address,John Company,1,987654321,John City,John State,,

@@ -1,91 +1,65 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
 
 SERVICE_NAME="lemonbooks-api"
-DEPLOY_DIR="${DEPLOY_DIR:-/home/tinkerpal/lemonbooks-platform}"
-API_DIR="$DEPLOY_DIR/apps/api"
-NODE_BIN="$(command -v node)"
-SYSTEM_USER="${SYSTEM_USER:-tinkerpal}"
-NODE_ENV="${NODE_ENV:-production}"
-PORT="${PORT:-5007}"
-RESTART_SEC=5
-TIMEOUT_STOP_SEC=30
+APP_DIR="/home/tinkerpal/lemonbooks-platform/apps/api"
+NODE_BIN="/usr/bin/node"
+SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-# --- Colors ---
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
-error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
-
-# --- Checks ---
-[[ $EUID -ne 0 ]] && error "Run this script as root (sudo ./setup.sh)"
-
-[[ -d "$DEPLOY_DIR" ]] || error "Deploy directory not found: $DEPLOY_DIR"
-[[ -f "$API_DIR/.env" ]] || error "Missing $API_DIR/.env — create it from .env.example first"
-[[ -d "$API_DIR/build" ]] || error "Build directory not found — run 'npm run build' first"
-[[ -x "$NODE_BIN" ]] || error "Node.js not found in PATH"
-
-info "Deploy directory: $DEPLOY_DIR"
-info "Node binary: $NODE_BIN"
-info "Node version: $("$NODE_BIN" --version)"
-
-# --- Create system user if it doesn't exist ---
-if ! id "$SYSTEM_USER" &>/dev/null; then
-    info "Creating system user: $SYSTEM_USER"
-    useradd --system --shell /usr/sbin/nologin --home-dir "$DEPLOY_DIR" "$SYSTEM_USER"
-else
-    info "System user $SYSTEM_USER already exists"
+if [ ! -d "$APP_DIR" ]; then
+  echo "Error: App directory $APP_DIR does not exist."
+  exit 1
 fi
 
-chown -R "$SYSTEM_USER":"$SYSTEM_USER" "$DEPLOY_DIR"
-chmod 600 "$API_DIR/.env"
+if [ ! -d "$APP_DIR/build" ]; then
+  echo "Error: Build directory not found. Run 'npm run build' first."
+  exit 1
+fi
 
-# --- Write systemd service ---
-info "Creating systemd service: $SERVICE_NAME"
+if [ ! -f "$APP_DIR/.env" ]; then
+  echo "Error: Missing $APP_DIR/.env"
+  exit 1
+fi
 
-cat > "/etc/systemd/system/${SERVICE_NAME}.service" << EOF
+echo "Pulling latest changes..."
+cd "$APP_DIR/.."
+git pull origin main || echo "Git pull failed or not a git repo, continuing..."
+
+echo "Building..."
+npm install && npm run build
+
+echo "Creating systemd service file..."
+sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
 Description=LemonBooks API
-Documentation=https://github.com/your-org/lemonbooks-platform
 After=network.target postgresql.service
 Wants=postgresql.service
 
 [Service]
 Type=simple
-User=$SYSTEM_USER
-Group=$SYSTEM_USER
-WorkingDirectory=$API_DIR
-Environment=NODE_ENV=$NODE_ENV
+WorkingDirectory=$APP_DIR
+Environment=NODE_ENV=production
 ExecStart=$NODE_BIN build/index.js
 Restart=on-failure
-RestartSec=$RESTART_SEC
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=$SERVICE_NAME
-KillSignal=SIGTERM
-TimeoutStopSec=$TIMEOUT_STOP_SEC
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=$DEPLOY_DIR
-PrivateTmp=true
 
+[Install]
 WantedBy=multi-user.target
 EOF
 
-# --- Reload and enable ---
-systemctl daemon-reload
-systemctl enable "$SERVICE_NAME"
+echo "Reloading systemd..."
+sudo systemctl daemon-reexec
+sudo systemctl daemon-reload
+sudo systemctl enable ${SERVICE_NAME}.service
 
-info "Service installed and enabled."
-echo ""
-echo "  To start:   sudo systemctl start $SERVICE_NAME"
-echo "  To stop:    sudo systemctl stop $SERVICE_NAME"
-echo "  To restart: sudo systemctl restart $SERVICE_NAME"
-echo "  Logs:       sudo journalctl -u $SERVICE_NAME -f"
-echo "  Health:     curl http://localhost:$PORT/health"
-echo ""
+echo "Service '$SERVICE_NAME' created and enabled."
+read -p "Do you want to start the app now? (y/n): " choice
+
+if [[ "$choice" =~ ^[Yy]$ ]]; then
+  sudo systemctl start ${SERVICE_NAME}.service
+  echo "Started. Check with: sudo journalctl -u ${SERVICE_NAME} -f"
+else
+  echo "Start manually with: sudo systemctl start ${SERVICE_NAME}.service"
+fi

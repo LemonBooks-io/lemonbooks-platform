@@ -24,13 +24,12 @@ CREATE TABLE IF NOT EXISTS users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email text NOT NULL,
   name text NOT NULL,
-  password_hash text NOT NULL,
+  password_hash text,
   email_verified_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (email)
 );
-
 CREATE TABLE IF NOT EXISTS memberships (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
@@ -153,7 +152,7 @@ CREATE TABLE IF NOT EXISTS payment_intents (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
   invoice_id uuid NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
-  provider text NOT NULL CHECK (provider IN ('paystack')),
+  provider text NOT NULL CHECK (provider IN ('paystack','monnify')),
   reference text NOT NULL UNIQUE,
   access_code text,
   authorization_url text,
@@ -166,6 +165,8 @@ CREATE TABLE IF NOT EXISTS payment_intents (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS payment_intents_business_idx ON payment_intents(business_id,created_at);
+ALTER TABLE payment_intents DROP CONSTRAINT IF EXISTS payment_intents_provider_check;
+ALTER TABLE payment_intents ADD CONSTRAINT payment_intents_provider_check CHECK (provider IN ('paystack','monnify'));
 ALTER TABLE payment_intents ADD COLUMN IF NOT EXISTS allocations jsonb NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS group_reference text;
 UPDATE payments SET group_reference=reference WHERE group_reference IS NULL AND reference IS NOT NULL;
@@ -217,6 +218,20 @@ CREATE TABLE IF NOT EXISTS client_accounts (
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (business_id,email), UNIQUE (business_id,client_id)
 );
+ALTER TABLE client_accounts ALTER COLUMN password_hash DROP NOT NULL;
+
+CREATE TABLE IF NOT EXISTS client_auth_challenges (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  client_id uuid NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  email text NOT NULL,
+  purpose text NOT NULL CHECK (purpose IN ('activate','login')),
+  otp_hash text NOT NULL,
+  attempts integer NOT NULL DEFAULT 0,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS client_auth_challenges_lookup_idx ON client_auth_challenges(business_id,email,purpose,created_at DESC);
 
 CREATE TABLE IF NOT EXISTS business_payment_accounts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -238,6 +253,18 @@ CREATE TABLE IF NOT EXISTS business_payment_accounts (
   currency char(3) NOT NULL DEFAULT 'NGN',
   provider_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
   failure_reason text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS business_transfer_accounts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id uuid NOT NULL UNIQUE REFERENCES businesses(id) ON DELETE CASCADE,
+  bank_code text NOT NULL,
+  bank_name text NOT NULL,
+  account_number text NOT NULL,
+  account_name text NOT NULL,
+  verified_at timestamptz NOT NULL DEFAULT now(),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );

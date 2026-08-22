@@ -14,6 +14,7 @@ import { paymentsRouter } from "./routes/payments.routes";
 import { integrationsRouter } from "./routes/integrations.routes";
 import { whatsappRouter } from "./routes/whatsapp.routes";
 import { metaWebhookReceiver, metaWebhookVerification } from "./routes/meta-whatsapp-webhook";
+import { monnifyRouter, monnifyWebhook } from "./routes/monnify.routes";
 
 export function createApp() {
   const app = express();
@@ -28,10 +29,12 @@ export function createApp() {
   app.get("/health", (_req, res) => res.json({ success: true, message: "LemonBooks API is healthy", data: { database: "postgresql" } }));
   app.use("/api/v3/auth", authRouter);
   app.post("/api/v3/payments/paystack/webhook", paystackWebhook);
+  app.post("/api/v3/payments/monnify/webhook/:connectionId", monnifyWebhook);
   app.get("/api/v3/webhooks/whatsapp", metaWebhookVerification);
   app.post("/api/v3/webhooks/whatsapp", metaWebhookReceiver);
   app.use("/api/v3/public", publicRouter);
   app.use("/api/v3/payments/paystack", authenticate, paystackRouter);
+  app.use("/api/v3/payments/monnify", authenticate, monnifyRouter);
   app.use("/api/v3/business", authenticate, businessRouter);
   app.use("/api/v3/resources", authenticate, resourcesRouter);
   app.use("/api/v3/sync", authenticate, syncRouter);

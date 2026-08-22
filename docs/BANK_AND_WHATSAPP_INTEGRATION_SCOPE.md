@@ -2,12 +2,12 @@
 
 Status: production implementation specification  
 Owner: LemonBooks product and engineering  
-Last reviewed: 2026-08-20  
+Last reviewed: 2026-08-22
 Initial market: Nigeria  
 Initial banking candidate: Moniepoint  
 Messaging platform: Meta WhatsApp Business Platform / Cloud API
 
-## Implementation status — 2026-08-20
+## Implementation status — 2026-08-22
 
 Implemented and locally testable:
 
@@ -18,7 +18,7 @@ Implemented and locally testable:
 - Manual accept, combined invoice allocations, ignore, and reversible reconciliation APIs with payment, invoice, inventory, audit, and outbox effects.
 - Banking workspace with connected account health, statement import, signed credit simulation, money feed, confidence explanations, and suggested-match approval.
 - WhatsApp connection, contact, conversation, message, template, consent, service-window, automation-rule, and automation-run persistence.
-- Safe Embedded Signup simulator, signed production webhook verification/storage endpoint, inbound/status event deduplication, inbound message simulation, deterministic invoice/amount/payment-intent extraction, opt-out, human states, and template/free-form policy checks.
+- Meta Embedded Signup session creation, JavaScript SDK launch, server-side authorization-code exchange, WABA/phone ownership verification, WABA subscription, encrypted production credential persistence, template synchronization, signed production webhook processing, inbound/status deduplication, deterministic invoice/amount/payment-intent extraction, opt-out, human states, and basic template/free-form policy checks.
 - WhatsApp workspace with health, inbox, conversation context, simulated inbound messages, delivery states, policy visibility, and automation controls.
 - Outbox-driven payment-confirmation automation for Paystack, approved manual claims, and bank reconciliations.
 - Automated tests for signed provider normalization, forged signatures, open/closed service windows, opt-out suppression, and evidence-only extraction.
@@ -31,7 +31,9 @@ Implemented and locally testable:
 Still dependent on external approval or follow-up hardening:
 
 - Live Moniepoint account-feed adapter, credentials, account linking, complete event/status mapping, and certification.
-- Live Meta Embedded Signup completion/token exchange, production connection creation, template synchronization API calls, outbound Cloud API delivery, coexistence confirmation, and app review.
+- Meta App Review, Advanced Access, Tech Provider approval, production configuration validation, coexistence onboarding/confirmation, number-registration recovery, Meta business-verification status, token renewal, and complete Meta-side revocation.
+- Manual production inbox sends call Cloud API, but outbox-driven automations still create simulated provider IDs and must not be treated as live delivery until replaced by the production sender worker.
+- AI-assisted product/order interpretation, draft order and invoice creation, inventory reservation, and WhatsApp-to-reconciliation candidate creation are not implemented.
 - Broader performance/load testing still requires an isolated production-shaped database and traffic profile; deterministic database concurrency fixtures are active locally.
 - Production secrets must move from environment variables to a managed secret store/KMS envelope-encryption implementation.
 - Transfer reconciliation targets and provider-certified live traffic remain later implementation batches.
@@ -834,6 +836,12 @@ The program is not production-ready until:
 
 ## 29. Primary references reviewed
 
+### Implemented Monnify collections integration
+
+LemonBooks supports Monnify as an invoice collection provider alongside Paystack: credential verification and encrypted activation, hosted checkout initialization, server-side transaction verification, signed webhook settlement, payment-intent idempotency, and automatic invoice/ledger reconciliation. Activation uses an API key, secret key, and contract code because Monnify's public merchant documentation does not expose an OAuth or embedded account-linking flow. This covers payments initiated through LemonBooks; it is not a historical bank-account aggregation feed.
+
+Production setup requires `INTEGRATION_CREDENTIALS_KEY`, public web/API URLs, a live Monnify merchant contract, and registration of the connection-specific webhook URL shown in Business settings.
+
 - [Meta WhatsApp Business Messaging Policy](https://whatsappbusiness.com/policy/)
 - [Meta WhatsApp Business Platform API collection](https://www.postman.com/meta/whatsapp-business-platform/overview)
 - [Moniepoint POS developer getting started](https://teamapt.atlassian.net/wiki/spaces/EI/pages/2170421476/Getting+Started)
@@ -843,3 +851,488 @@ The program is not production-ready until:
 - [Nigeria Data Protection Commission FAQs](https://www.ndpc.gov.ng/faqs/)
 
 These references establish planning constraints, not automatic approval for LemonBooks to access any merchant account or message data. Provider contracts, current technical documentation, and counsel review control the launch decision.
+
+## 30. WhatsApp merchant onboarding specification
+
+### Product promise and ownership
+
+LemonBooks uses one approved LemonBooks Meta application and one or more approved Embedded Signup configurations. A merchant never creates a Meta developer application, system user, webhook, or API token. Each merchant nevertheless owns its own Meta Business Portfolio, WABA, phone number, customer relationships, and message content. LemonBooks receives revocable authority to operate the permitted assets on the merchant's behalf.
+
+The onboarding UI must avoid unexplained Meta terminology. Show WABA, phone-number, token, app-subscription, and portfolio identifiers only in an advanced diagnostic view available to authorized administrators and support staff.
+
+### Entry paths
+
+The first LemonBooks screen must ask which situation applies:
+
+1. **Existing WhatsApp Business App number.** Launch the Meta-approved Coexistence variation. Explain that continued mobile-app use is subject to Meta eligibility and must not be promised before Meta confirms it.
+2. **Existing unused phone number.** Launch standard Cloud API Embedded Signup. The number must be able to receive the Meta verification method and must not be bound to an incompatible WhatsApp account.
+3. **Needs a new phone number.** Either send the merchant through an approved number-provisioning partner flow or explain that LemonBooks does not supply telephone numbers and require the merchant to obtain one before continuing. Meta account creation is not telephone-number provisioning.
+
+Do not infer the path from the phone number alone. Record the merchant's selection and the Embedded Signup configuration/variation used.
+
+### Standard Embedded Signup sequence
+
+```text
+Merchant clicks Connect WhatsApp
+  -> LemonBooks authorizes owner/admin and creates one-time signup session
+  -> frontend loads Meta JavaScript SDK from the approved origin
+  -> frontend launches the approved Embedded Signup configuration
+  -> merchant authenticates to Meta
+  -> merchant selects or creates a Business Portfolio
+  -> merchant selects or creates a WABA
+  -> merchant selects/adds and verifies a phone number
+  -> Meta returns authorization code plus session event data
+  -> LemonBooks backend validates state, user, tenant, expiry and single use
+  -> backend exchanges code for business token
+  -> backend independently retrieves and validates authorized assets
+  -> backend completes registration when required by the current Meta flow
+  -> backend subscribes LemonBooks app to the WABA
+  -> backend performs a capability/health read
+  -> backend encrypts credentials and activates connection transactionally
+  -> background worker performs initial template and health synchronization
+  -> UI shows Connected only after all required activation checks pass
+```
+
+The frontend-provided WABA and phone-number IDs are untrusted hints. The backend must confirm them through Meta before storage. A signup session is bound to business, requesting user, intended onboarding path, configuration ID, state hash, creation time, expiry, and completion status. It is single use and expires within ten minutes.
+
+### Coexistence sequence
+
+Coexistence requires its own approved Meta configuration or documented feature variation. The implementation must:
+
+- launch the current Meta WhatsApp Business App onboarding feature rather than the standard empty/default feature type
+- collect Meta session logging and all required completion events
+- let Meta determine number, country, app-version, account, and business eligibility
+- record `eligible`, `ineligible`, `pending`, `active`, `attention`, or `disconnected`, plus a sanitized reason code
+- confirm whether mobile-app history/contact synchronization was selected and completed when Meta exposes that state
+- display “Keep using the WhatsApp Business App” only after an `active` result
+- provide standard Cloud API migration, another number, or cancel as explicit fallbacks
+- never attempt unofficial device linking, QR scraping, browser automation, or chat-history harvesting
+
+Coexistence behavior and eligibility can change. The Meta documentation version and feature/configuration used must be stored with each onboarding attempt.
+
+### Number registration and two-step verification
+
+After signup, query the number's current registration and messaging state. If the applicable Meta flow requires `POST /{phone-number-id}/register`, perform it server-side with the required `messaging_product` and merchant-provided six-digit PIN. The PIN is a write-only secret: use it for registration, never log it, never return it, and never persist it after the request completes.
+
+If registration is already complete, treat the operation as idempotent. If two-step verification or registration needs merchant action, set the connection to `attention`, provide a resumable task, and do not claim that the number is active.
+
+### Meta-owned actions and verification
+
+Meta controls authentication, authorization, phone OTP, asset ownership, display-name review, account restrictions, and Meta Business Verification. LemonBooks may launch or deep-link the applicable Meta experience, explain what is needed, poll permitted status fields, and show remediation state. LemonBooks must not claim to perform or approve Meta verification.
+
+Business verification is not always a prerequisite for initial sandbox/testing capability, but any limit, production, feature, or regional requirement observed from Meta must be represented as a connection task. Store only status and permitted business metadata; do not copy verification documents into LemonBooks.
+
+### Onboarding completion states
+
+```text
+not_connected
+  -> onboarding
+  -> awaiting_phone_verification
+  -> awaiting_registration
+  -> awaiting_business_verification
+  -> synchronizing
+  -> connected
+  -> attention
+  -> restricted | suspended | revoked | disconnected
+```
+
+Transitions are monotonic within one onboarding attempt except for explicit retry/recovery. `connected` requires a usable credential, verified asset relationship, registered/messaging-capable number, active app subscription, successful health read, and no known blocking restriction. UI success copy must correspond to this definition.
+
+### Asset collision and transfer rule
+
+A `(provider, environment, phone-number-id)` belongs to exactly one active LemonBooks business. A conflict must return an ownership error; an upsert must never silently replace `business_id`. Moving an asset requires an authenticated transfer workflow, authority checks on both sides where applicable, a Meta reauthorization, explicit confirmation, audit records, and revocation of the previous connection.
+
+## 31. WhatsApp connection and credential lifecycle
+
+Store, directly or in versioned capability metadata:
+
+- LemonBooks business and connection IDs
+- Meta Business Portfolio ID when returned/permitted
+- WABA ID and name
+- phone-number ID and masked/display number
+- verified display name and its review state
+- platform type and onboarding path
+- Coexistence capability/state
+- registration and messaging status
+- quality rating and restriction reason
+- app-subscription state
+- Embedded Signup configuration and documented flow version
+- token type, issued time, expiry, last validation, and credential key version
+- default language, timezone, and merchant operational number
+- last template sync, inbound webhook, outbound acceptance, health check, and error code
+
+### Token handling
+
+- Exchange authorization codes only on the backend using the Meta app secret.
+- Encrypt business tokens with managed KMS/envelope encryption in production; local AES-GCM is a development fallback.
+- Never return, log, place in analytics, or expose tokens to the browser after exchange.
+- Validate credentials immediately and on a scheduled cadence.
+- Warn authorized merchant administrators before known expiry.
+- Mark `attention` on expired/revoked tokens or permission loss and provide reauthorization.
+- Support encryption-key rotation without requiring merchant reconnection.
+- Maintain only one current credential version; retain no readable historical secret.
+
+### Health synchronization
+
+A scheduled worker must refresh permitted account/number health, subscription state, template status, quality state, verification state, and token validity. Use bounded retries, provider-aware backoff, jitter, rate-limit handling, and sanitized errors. Provider outages produce `degraded/data_delayed`, not immediate disconnection.
+
+### Disconnect and revoke
+
+Disconnect is a workflow, not only a local soft delete:
+
+1. Stop new automation claims and outbound sends.
+2. Mark the connection `revoking` and drain or suppress queued work.
+3. Unsubscribe the LemonBooks app from the WABA when authorized and appropriate.
+4. Revoke/remove the applicable Meta business integration or token using the currently supported mechanism; if merchant action is required, provide it explicitly.
+5. Delete encrypted credentials and invalidate local sessions.
+6. Mark the connection revoked/disconnected and audit each result.
+7. Apply the configured message/content retention policy without deleting accounting records that must legally remain.
+
+Partial Meta-side revocation must remain visible as `attention`; the UI must not claim complete revocation until confirmed or clearly disclose the remaining merchant action.
+
+## 32. Embedded Signup API contracts
+
+The route prefix may remain `/api/v3/whatsapp`; naming differences from this specification do not change the contract.
+
+### Create session
+
+`POST /whatsapp/embedded-signup/session`
+
+Request:
+
+```json
+{
+  "onboardingPath": "standard|coexistence|provisioned_number",
+  "returnPath": "/whatsapp"
+}
+```
+
+Response contains only public SDK values, opaque state, expiry, flow/configuration identifier, and version. Validate owner/admin role, allowed HTTPS return path, environment configuration, rate limit, and absence of another active completion for the same attempt.
+
+### Complete session
+
+`POST /whatsapp/embedded-signup/complete`
+
+Request:
+
+```json
+{
+  "state": "opaque-one-time-state",
+  "code": "short-lived-authorization-code",
+  "wabaId": "meta-id-hint",
+  "phoneNumberId": "meta-id-hint",
+  "sessionInfo": {}
+}
+```
+
+The backend validates and normalizes assets itself. Return `202 Accepted` with connection/onboarding status while post-signup work runs; return `201` only if every synchronous activation invariant has completed. Do not expose encrypted credentials or raw Meta payloads.
+
+### Resume and status
+
+- `GET /whatsapp/onboarding/:attemptId` returns safe status, tasks, and resumable action.
+- `POST /whatsapp/onboarding/:attemptId/retry` retries only idempotent server work.
+- `POST /whatsapp/onboarding/:attemptId/register` accepts a write-only PIN when required.
+- `GET /whatsapp/connection` returns connection health and safe merchant-facing identifiers.
+- `DELETE /whatsapp/connection` starts the asynchronous revocation workflow.
+
+Use stable LemonBooks error codes such as `META_CONFIG_MISSING`, `SIGNUP_EXPIRED`, `ASSET_NOT_AUTHORIZED`, `ASSET_ALREADY_CONNECTED`, `PHONE_REGISTRATION_REQUIRED`, `COEXISTENCE_INELIGIBLE`, `META_VERIFICATION_REQUIRED`, `TOKEN_REAUTH_REQUIRED`, and `META_RATE_LIMITED`. Provider messages are diagnostics, never the public API contract.
+
+## 33. Webhook event contract and processing
+
+### Edge handling
+
+The public Meta callback supports verification challenge and signed event delivery. For POST delivery:
+
+1. Enforce HTTPS, supported content type, body-size limit, and request timeout.
+2. Capture exact raw bytes before JSON parsing.
+3. Validate the current Meta signature mechanism using constant-time comparison.
+4. Resolve tenant/connection using a verified provider asset identifier.
+5. Persist an immutable event envelope and deterministic provider event ID.
+6. Enqueue processing transactionally.
+7. Return success quickly without performing conversation/domain work inline.
+
+Invalid signatures return an error and create a security metric without storing sensitive raw content in ordinary logs. Valid events for unknown assets are quarantined with restricted diagnostics and must not be assigned to a guessed tenant.
+
+### Normalized event families
+
+Support and version normalized schemas for:
+
+- inbound text
+- image, audio, video, document, and sticker metadata
+- button and list replies
+- location, contact, reaction, reply/context, and referral metadata when supported
+- outbound accepted, sent, delivered, read, failed, and deleted/unsupported states
+- template created, approved, rejected, paused, disabled, and category/language changes
+- phone/account quality, restriction, capability, and verification changes
+- Coexistence/history synchronization events made available by Meta
+- unknown future fields/events preserved as `unknown` without failing the payload
+
+Media is downloaded only when a configured business workflow needs it. Enforce allowlisted types, maximum size, malware scanning, encryption, access control, and deletion schedule. Never treat receipt-image OCR as settlement proof.
+
+### Ordering, retries, and idempotency
+
+- Deduplicate by stable provider event identity; if unavailable, use a documented fingerprint.
+- Make status application safe when `delivered/read/failed` arrives before local message persistence.
+- Keep retry attempt, next availability, lease, and dead-letter state.
+- Do not acknowledge malformed authenticated events as processed; quarantine them for schema review.
+- Store provider occurrence time and LemonBooks receipt/processing times separately.
+- Replaying a dead-letter event must not duplicate messages, orders, invoices, payments, inventory postings, or automation sends.
+
+## 34. Messaging and template delivery specification
+
+### Central sender
+
+Every manual or automated outbound message must use one production sender service. The sender:
+
+1. Loads the tenant-owned active connection and decrypts its current credential.
+2. Loads recipient consent, block, service-window, conversation, invoice/order, rule, and plan state.
+3. Executes the centralized policy decision.
+4. Validates and renders template parameters or free-form content.
+5. Creates an idempotent pending command/run.
+6. Calls Meta outside a long-running database transaction.
+7. Stores the returned provider message ID as `accepted`.
+8. Updates delivery state only from subsequent provider webhooks.
+
+Never synthesize a Meta-looking ID in production. Never write `delivered` at API acceptance time. Mock providers must be explicitly labelled and isolated by environment.
+
+### Template model
+
+Persist template identity, name, language, category, status, component schema, header/body/footer/buttons, variable schema, example values, version/hash, rejection reason, and synchronization time. A LemonBooks use case maps to an approved template version rather than relying only on a name.
+
+Before sending, validate:
+
+- template is approved and belongs to the same WABA/connection
+- requested language exists
+- every required parameter is present and typed
+- invoice/customer data belongs to the same tenant
+- rendered values meet provider length/content constraints
+- URL/button parameters are allowlisted and safe
+- category and estimated charge are current enough for display
+
+Store a redacted render snapshot for audit. Do not store secrets or unnecessary payment data in message bodies.
+
+### Service window and consent
+
+An inbound customer message opens the currently applicable customer-service window. Business messages never extend it. Outside the window, use only an approved template for a permitted purpose. Opt-out applies immediately across automation and manual send surfaces; opt-in source and timestamp must be auditable. Provide human escalation for automated interactions.
+
+### Automation worker correction
+
+The current simulated outbox delivery is a release blocker. Replace it with the central sender and require production tests proving that:
+
+- the provider call occurs once per idempotency key
+- accepted is distinct from delivered/read
+- transient failures retry without duplication
+- permanent failures become actionable runs
+- suppression reasons remain inspectable
+- invoice/payment state changes after enqueue cause re-evaluation before send
+
+## 35. AI-assisted commerce and human review
+
+### Allowed AI role
+
+AI may classify intent and propose structured business actions. It may not independently confirm payment, post ledger entries, issue refunds, change bank data, delete records, or make irreversible inventory/accounting decisions.
+
+### Inbound pipeline
+
+```text
+authenticated WhatsApp message
+  -> deterministic commands (stop/help/reference)
+  -> tenant/customer candidate lookup
+  -> product/SKU catalogue retrieval scoped to tenant
+  -> structured extraction/classification
+  -> validation against price, stock, tax and customer rules
+  -> confidence and ambiguity evaluation
+  -> draft order/quotation/invoice proposal
+  -> merchant review or narrowly approved auto-draft policy
+  -> domain command with idempotency and audit
+  -> policy-checked WhatsApp confirmation
+```
+
+The structured proposal schema includes intent, customer candidates, requested lines, source phrase references, SKU candidates, quantities/units, quoted price/currency, delivery details, invoice/payment references, confidence per field, ambiguity codes, model/provider/version, prompt/policy version, and redaction metadata.
+
+### Product and quantity matching
+
+Use deterministic exact SKU/barcode/alias matching first, then normalized catalogue search, then AI ranking. Never invent a product or price. Ambiguous units such as carton/piece/pack require tenant-configured conversions or merchant confirmation. Out-of-stock items produce alternatives or review, not negative inventory.
+
+### Draft order and invoice rules
+
+- Creating a draft is distinct from accepting an order.
+- Stock reservation is transactional, expiring, reversible, and based on confirmed units.
+- Prices, discounts, tax, currency, customer credit, and fulfillment terms come from LemonBooks domain services.
+- Merchant confirmation is required by default before sending a final invoice.
+- Auto-draft/auto-confirm eligibility is configurable per tenant, customer, value threshold, SKU, and confidence threshold.
+- Every domain command includes source message/event IDs and an idempotency key.
+- Editing or rejecting an AI proposal is retained as audit/correction data under the retention policy, not automatically used to train a model.
+
+### AI privacy and safety
+
+Minimize/redact message content before external model calls, contractually prohibit provider training where required, define region/retention, defend against prompt injection, isolate tenant context, and log metadata rather than raw prompts. Attachments and URLs are untrusted. Model output is parsed through a strict schema and validated against authoritative LemonBooks data.
+
+## 36. WhatsApp payment claims and reconciliation commands
+
+A message such as “Transferred NGN 250,000 for LB-1088” creates evidence, never a payment.
+
+The production processor must:
+
+1. Persist the authenticated message.
+2. Extract amount, currency, invoice/reference, sender/customer candidates, transfer time, bank hints, and receipt attachment reference.
+3. Resolve invoice candidates within the same tenant.
+4. Search authoritative booked bank transactions and verified payment-provider settlements.
+5. Create reconciliation candidates with reason codes and source links.
+6. Auto-post only under the configured deterministic reconciliation policy.
+7. Otherwise show the claim in Needs attention with merchant review actions.
+8. Send payment confirmation only after the authoritative domain payment/reconciliation event commits.
+
+Required states:
+
+```text
+claim_received -> searching -> matched_suggested -> confirmed
+                              -> ambiguous -> needs_attention
+                              -> no_match -> awaiting_settlement
+                              -> rejected
+```
+
+Partial/fragmented payments allocate only verified settled amounts. Multiple transactions may satisfy one invoice, and one transaction may be split across invoices only through existing reconciliation controls. Reversals/chargebacks reverse the financial allocation and may trigger a policy-approved notification; the original WhatsApp claim remains evidence history.
+
+## 37. WhatsApp product UX specification
+
+### Integrations catalogue
+
+Place WhatsApp alongside bank and payment integrations in a consistent catalogue. The card shows provider, safe connection state, masked connected number, WABA/display name, Coexistence state, health, last successful sync/event, and primary action. Sensitive identifiers remain masked; credentials are never displayed.
+
+### Connect experience
+
+- Explain the three onboarding paths before Meta opens.
+- Clearly label Meta-controlled screens.
+- Preserve LemonBooks context when popup cancellation/error occurs.
+- Show progress and resumable tasks rather than generic failure.
+- Do not show success until activation invariants pass.
+- Provide accessible keyboard/focus behavior and responsive mobile layout.
+
+### Connected experience
+
+Show connection health, number, display name, mobile-app continuation status, verification/restriction tasks, template health, webhook health, token/reauthorization attention, last inbound/outbound event, and disconnect. Provide a test send only to an authorized recipient and clearly distinguish accepted/delivered/read.
+
+### Inbox and automation
+
+The inbox shows customer context, open invoices, payment evidence, order drafts, stock context, assignment, automation state, and human handoff without implying identity from phone equality alone. Automation setup previews the exact approved template and parameters, timing, quiet hours, frequency cap, audience, charge category, suppression rules, and test result.
+
+### Honest status language
+
+- `Connected`: verified and messaging-capable.
+- `Accepted by WhatsApp`: provider returned a message ID.
+- `Delivered`/`Read`: received through provider status webhook.
+- `Payment claimed`: customer statement only.
+- `Payment confirmed`: authoritative provider/bank/manual-control workflow completed.
+- `Keep using WhatsApp Business`: only active Coexistence confirmation permits this copy.
+
+## 38. Production configuration and Meta release checklist
+
+### LemonBooks Meta assets
+
+- dedicated LemonBooks Meta Business Portfolio under controlled corporate ownership
+- dedicated production Meta developer app; separate development/staging app where permitted
+- WhatsApp product and Facebook Login for Business configured
+- approved Embedded Signup configurations for standard and Coexistence flows as applicable
+- exact HTTPS domains, OAuth redirect origins, privacy policy, terms, and data-deletion URLs
+- production webhook callback and strong verification secret
+- app secret and credential-encryption keys in managed secret storage
+- least-privilege business roles with MFA and recovery ownership
+
+### Approval gates
+
+- LemonBooks Meta business/access verification complete
+- Tech Provider or selected BSP relationship approved
+- App Review and Advanced Access approved for every permission actually used
+- Embedded Signup and Coexistence variations approved for production use
+- test business/WABA/number and reviewer credentials maintained
+- review evidence demonstrates onboarding, inbound webhook, outbound delivery, opt-out, human handoff, data deletion, and requested-permission use
+- merchant billing/payment-method responsibilities and messaging limits documented
+- launch countries and number types validated against current Meta eligibility
+
+### Environment configuration
+
+At minimum configure and validate on startup:
+
+- `WHATSAPP_META_APP_ID`
+- `WHATSAPP_META_APP_SECRET`
+- `WHATSAPP_META_CONFIG_ID`
+- separate Coexistence configuration/feature setting when used
+- pinned supported Graph API version
+- webhook verification secret
+- integration credential encryption/KMS configuration
+- public HTTPS API and web origins
+- queue/worker, retry, rate-limit, retention, and kill-switch configuration
+
+Fail closed when production configuration is missing. Never silently fall back to mock delivery in production.
+
+## 39. Detailed test and acceptance matrix
+
+### Onboarding
+
+- new merchant creates/selects portfolio and WABA without a developer app
+- standard unused-number verification and activation
+- existing WABA/number selection where Meta permits it
+- Coexistence eligible, ineligible, cancelled, interrupted, and resumed paths
+- OTP failure/expiry and registration PIN required/incorrect/success paths
+- business verification pending/restricted/remediated
+- popup blocked, SDK unavailable, code returned without session event and vice versa
+- expired/replayed state and code, wrong user, wrong tenant, tampered asset IDs
+- existing phone asset collision cannot reassign tenant
+
+### Credentials and lifecycle
+
+- encryption, decryption, KMS/key rotation, and secret redaction
+- token expiry, revocation, permission loss, reauthorization, and provider outage
+- app subscription lost/restored
+- disconnect suppresses sends and performs/reports Meta-side revocation
+
+### Webhooks
+
+- valid and forged signatures over exact raw bytes
+- duplicate, delayed, out-of-order, batched, malformed, oversized, and unknown events
+- text, supported media, interactive, status, template, account, quality, and Coexistence events
+- unknown asset never crosses tenants
+- fast acknowledgement under production-shaped load
+- retry/dead-letter replay has no duplicated domain effects
+
+### Messaging
+
+- service window boundary and clock/timezone behavior
+- opt-in, immediate opt-out, block, human handoff, and automation pause
+- approved/rejected/paused template and missing/wrong parameters
+- accepted versus delivered/read/failed state progression
+- manual and automated sends use the same policy/sender
+- frequency, quiet-hours, duplicate, invoice-state, budget, plan, and kill-switch suppression
+- no simulated provider ID or false delivery state in production
+
+### AI commerce and reconciliation
+
+- exact/ambiguous SKU, aliases, units, quantities, currency, price and stock
+- prompt injection, malicious URL/attachment, schema-invalid output, provider timeout
+- confidence threshold and mandatory human-review behavior
+- idempotent draft order/invoice and expiring/reversible stock reservation
+- payment claim with exact, partial, split, duplicate, absent, pending, reversed, and conflicting settlement
+- WhatsApp evidence alone can never confirm or post payment
+
+### Accessibility, privacy, and operations
+
+- keyboard/screen-reader onboarding and mobile viewport
+- data export/deletion/retention and accounting-record exception
+- audit completeness with no credentials or unnecessary message content
+- dashboards, alerts, trace correlation, redrive controls, backup/restore, and incident runbooks
+
+## 40. WhatsApp implementation work packages
+
+1. **Correctness remediation:** remove simulated production automation delivery, prevent cross-tenant asset reassignment, and make accepted/delivered states honest.
+2. **Onboarding lifecycle:** three-path UX, persisted attempts/tasks, registration recovery, verification/health states, and resumability.
+3. **Coexistence:** approved variation, eligibility/result persistence, fallback paths, and mobile-app status UX.
+4. **Credential operations:** managed encryption, health validation, reauthorization, rotation, and complete revocation workflow.
+5. **Webhook platform:** fast edge persistence, durable queue, normalized event families, media safety, ordering, and dead-letter operations.
+6. **Messaging platform:** central sender, complete policy engine, versioned template components/parameters, retries, delivery state, metering, and kill switches.
+7. **Transactional automation:** invoice, payment, receipt, overdue and low-stock events through the live sender with re-evaluation and idempotency.
+8. **Inbound commerce:** deterministic extraction, catalogue matching, AI proposals, merchant review, draft orders/invoices, and inventory reservations.
+9. **Reconciliation bridge:** evidence records, authoritative transaction search, candidates, partial/consolidated allocation, confirmation and reversals.
+10. **Production approval:** Meta configuration, Tech Provider/App Review evidence, country eligibility, privacy/compliance, load/security testing, runbooks and staged rollout.
+
+Each work package requires API/schema migrations, UI states, audit events, metrics, tests, operational documentation, feature flags, rollback strategy, and an owner. A work package is complete only when its production definition and failure paths are demonstrated end to end.

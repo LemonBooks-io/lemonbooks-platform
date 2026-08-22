@@ -28,17 +28,17 @@ export async function settle(reference: string, providerData: Record<string, any
     if (!intent) throw new HttpError(404, "Payment reference not found");
     if (intent.status === "success") return intent;
     const paidAmount = Number(providerData.amount) / 100;
-    if (providerData.status !== "success" || paidAmount !== Number(intent.amount) || providerData.currency !== intent.currency) throw new HttpError(409, "Paystack payment details do not match this invoice");
+    if (providerData.status !== "success" || paidAmount !== Number(intent.amount) || providerData.currency !== intent.currency) throw new HttpError(409, `${intent.provider} payment details do not match this invoice`);
     const savedAllocations = Array.isArray(intent.allocations) ? intent.allocations as Array<{ invoiceId:string;amount:number }> : [];
     const allocations = savedAllocations.length ? savedAllocations : [{ invoiceId:intent.invoice_id,amount:paidAmount }];
-    const allocatedTotal=allocations.reduce((sum,item)=>sum+Number(item.amount),0); if(Math.abs(allocatedTotal-paidAmount)>.001)throw new HttpError(409,"Payment allocations do not match the Paystack amount");
+    const allocatedTotal=allocations.reduce((sum,item)=>sum+Number(item.amount),0); if(Math.abs(allocatedTotal-paidAmount)>.001)throw new HttpError(409,`Payment allocations do not match the ${intent.provider} amount`);
     const paymentIds:string[]=[];
     for(const allocation of [...allocations].sort((a,b)=>a.invoiceId.localeCompare(b.invoiceId))){
       const invoiceResult=await client.query<{status:string;amount_paid:string;total:string}>("SELECT status,amount_paid,total FROM invoices WHERE id=$1 AND business_id=$2 FOR UPDATE",[allocation.invoiceId,intent.business_id]);const invoice=invoiceResult.rows[0];if(!invoice)throw new HttpError(404,"Invoice not found");
       const allocationAmount=Number(allocation.amount);const becomesPaid=invoice.status!=="paid"&&Number(invoice.amount_paid)+allocationAmount>=Number(invoice.total);const paymentReference=allocations.length>1?`${reference}:${allocation.invoiceId}`:reference;
       const paymentResult=await client.query(`INSERT INTO payments (business_id,invoice_id,amount,currency,method,reference,group_reference,status,received_at) VALUES ($1,$2,$3,$4,'card',$5,$6,'confirmed',COALESCE($7::timestamptz,now())) ON CONFLICT (business_id,reference) WHERE reference IS NOT NULL DO NOTHING RETURNING id`,[intent.business_id,allocation.invoiceId,allocationAmount,intent.currency,paymentReference,reference,providerData.paid_at||null]);
       await client.query(`UPDATE invoices SET amount_paid=LEAST(total,amount_paid+$1),status=CASE WHEN amount_paid+$1>=total THEN 'paid' ELSE 'part_paid' END,sync_version=sync_version+1,updated_at=now() WHERE id=$2 AND business_id=$3`,[allocationAmount,allocation.invoiceId,intent.business_id]);
-      if(becomesPaid)await recordInvoiceSale(client,allocation.invoiceId,intent.business_id);if(paymentResult.rows[0]){paymentIds.push(paymentResult.rows[0].id);await outbox(client,intent.business_id,"payment.confirmed","payment",paymentResult.rows[0].id,{invoiceId:allocation.invoiceId,paymentId:paymentResult.rows[0].id,source:"paystack"},`payment.confirmed:${paymentResult.rows[0].id}`);}
+      if(becomesPaid)await recordInvoiceSale(client,allocation.invoiceId,intent.business_id);if(paymentResult.rows[0]){paymentIds.push(paymentResult.rows[0].id);await outbox(client,intent.business_id,"payment.confirmed","payment",paymentResult.rows[0].id,{invoiceId:allocation.invoiceId,paymentId:paymentResult.rows[0].id,source:intent.provider},`payment.confirmed:${paymentResult.rows[0].id}`);}
       await client.query("INSERT INTO sync_changes (business_id,table_name,record_id,operation) VALUES ($1,'invoices',$2,'updated')",[intent.business_id,allocation.invoiceId]);
     }
     const updated = await client.query("UPDATE payment_intents SET status='success',provider_payload=$2,completed_at=now(),updated_at=now() WHERE id=$1 RETURNING *", [intent.id, JSON.stringify(providerData)]);

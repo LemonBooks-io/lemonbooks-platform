@@ -101,6 +101,46 @@ businessRouter.get("/payment-account/banks", asyncRoute(async (_req, res) => {
   return res.json({ success: true, data: response.data.map((bank: Record<string, unknown>) => ({ name: bank.name, code: bank.code })) });
 }));
 
+businessRouter.get("/transfer-account", asyncRoute(async (req, res) => {
+  const [account] = await query<Record<string, unknown>>(
+    `SELECT bank_code,bank_name,account_number,account_name,verified_at,updated_at
+     FROM business_transfer_accounts WHERE business_id=$1`,
+    [req.auth!.businessId],
+  );
+  res.json({ success: true, data: account ?? null });
+}));
+
+businessRouter.put("/transfer-account", asyncRoute(async (req, res) => {
+  const bankCode = String(req.body.bankCode ?? "").trim();
+  const accountNumber = String(req.body.accountNumber ?? "").trim();
+  if (!bankCode) throw new HttpError(400, "Choose the receiving bank");
+  if (!/^\d{10}$/.test(accountNumber)) throw new HttpError(400, "Enter a valid 10-digit account number");
+  if (!env.paystackSecretKey) throw new HttpError(503, "Bank account verification is not configured");
+  const testMode = env.paystackSecretKey.startsWith("sk_test_");
+  if (testMode && (bankCode !== "057" || accountNumber !== "0000000000"))
+    throw new HttpError(400, "In test mode use Zenith Bank (057) and account number 0000000000");
+  const resolution = testMode
+    ? { data: { bank_name: "Zenith Bank", account_name: "PAYSTACK TEST ACCOUNT" } }
+    : await paystack(`/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`);
+  const bankName = String(resolution.data.bank_name ?? "").trim();
+  const accountName = String(resolution.data.account_name ?? "").trim();
+  if (!bankName || !accountName) throw new HttpError(502, "The bank could not verify this account");
+  const [account] = await query<Record<string, unknown>>(
+    `INSERT INTO business_transfer_accounts(business_id,bank_code,bank_name,account_number,account_name)
+     VALUES($1,$2,$3,$4,$5)
+     ON CONFLICT(business_id) DO UPDATE SET bank_code=EXCLUDED.bank_code,bank_name=EXCLUDED.bank_name,
+       account_number=EXCLUDED.account_number,account_name=EXCLUDED.account_name,verified_at=now(),updated_at=now()
+     RETURNING bank_code,bank_name,account_number,account_name,verified_at,updated_at`,
+    [req.auth!.businessId, bankCode, bankName, accountNumber, accountName],
+  );
+  res.json({ success: true, message: "Transfer account verified and saved", data: account });
+}));
+
+businessRouter.delete("/transfer-account", asyncRoute(async (req, res) => {
+  await query("DELETE FROM business_transfer_accounts WHERE business_id=$1", [req.auth!.businessId]);
+  res.json({ success: true, message: "Transfer account removed", data: null });
+}));
+
 businessRouter.post("/payment-account/provision", asyncRoute(async (req, res) => {
   const { bankCode, accountNumber, preferredBank, bvn } = req.body;
   if (!/^\d{10}$/.test(String(accountNumber ?? ""))) throw new HttpError(400, "Enter a valid 10-digit settlement account number");

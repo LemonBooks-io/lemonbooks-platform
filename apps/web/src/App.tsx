@@ -24,6 +24,10 @@ function ProductRoutes() {
   const location = useLocation();
   if (location.pathname === "/data-deletion" || location.pathname === "/data-deletion/") return <DataDeletionPage/>;
   if (location.pathname.startsWith("/pay/invoice/")) return <Routes><Route path="/pay/invoice/:token" element={<PublicInvoicePage/>}/><Route path="*" element={<Navigate to="/customer-portal" replace/>}/></Routes>;
+  if (location.pathname.startsWith("/client-portal")) {
+    const suffix = location.pathname.slice("/client-portal".length);
+    return <Navigate to={`/customer-portal${suffix}${location.search}${location.hash}`} replace />;
+  }
   if (location.pathname.startsWith("/customer-portal")) return <Routes><Route path="/customer-portal/*" element={<CustomerPortalPage/>}/></Routes>;
   if (!session) return <AuthPage />;
   if (!session.business.onboardingCompleted) return <OnboardingPage />;

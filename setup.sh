@@ -5,9 +5,9 @@ SERVICE_NAME="lemonbooks-api"
 DEPLOY_DIR="${DEPLOY_DIR:-/home/tinkerpal/lemonbooks-platform}"
 API_DIR="$DEPLOY_DIR/apps/api"
 NODE_BIN="$(command -v node)"
-SYSTEM_USER="${SYSTEM_USER:-lemonbooks}"
+SYSTEM_USER="${SYSTEM_USER:-tinkerpal}"
 NODE_ENV="${NODE_ENV:-production}"
-PORT="${PORT:-5000}"
+PORT="${PORT:-5007}"
 RESTART_SEC=5
 TIMEOUT_STOP_SEC=30
 

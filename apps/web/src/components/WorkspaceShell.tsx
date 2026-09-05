@@ -16,7 +16,7 @@ export function WorkspaceShell({ children, title, description, action }: { child
   return <div className="workspace">
     {open && <button className="sidebar-backdrop" onClick={() => setOpen(false)} aria-label="Close navigation" />}
     <aside className={`sidebar ${open ? "sidebar--open" : ""}`}>
-      <div className="sidebar-brand"><a className="brand" href="/"><span className="brand-mark">L</span><span>LemonBooks</span></a><button className="mobile-close" onClick={() => setOpen(false)}><CloseCircle size={23} /></button></div>
+      <div className="sidebar-brand"><a className="brand" href="/"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><span>LemonBooks</span></a><button className="mobile-close" onClick={() => setOpen(false)}><CloseCircle size={23} /></button></div>
       <div className="business-switcher"><span className="business-avatar">{initials}</span><span><strong>{session!.business.name}</strong><small>{session!.business.tenantSlug}</small></span></div>
       <nav>{navigation.map((group) => <div className="nav-group" key={group.label}><p>{group.label}</p>{group.links.map(([to, label, Icon]) => <NavLink key={to} to={to} end={to === "/"} onClick={() => setOpen(false)} className={({ isActive }) => isActive ? "active" : ""}><Icon size={20} /><span>{label}</span></NavLink>)}</div>)}</nav>
       <div className="sidebar-help"><Building4 size={21} /><strong>Need a hand?</strong><p>Learn the basics of clean business books.</p><button>Open quick guide</button></div>

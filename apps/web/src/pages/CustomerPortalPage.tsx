@@ -192,7 +192,7 @@ export function CustomerPortalPage() {
     return (
       <main className="portal-loading" role="status">
         <span className="brand">
-          <span className="brand-mark">L</span>LemonBooks
+          <img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/>LemonBooks
         </span>
         <div>
           <span>
@@ -372,7 +372,7 @@ export function CustomerPortalPage() {
     <main className="customer-workspace">
       <header className="customer-topbar">
         <span className="brand">
-          <span className="brand-mark">L</span>LemonBooks
+          <img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/>LemonBooks
         </span>
         <div>
           <span>
@@ -702,7 +702,7 @@ export function CustomerPortalPage() {
               <article className="portal-panel statement-card">
                 <div className="statement-brand">
                   <div>
-                    <span className="brand-mark">L</span>
+                    <img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt="LemonBooks"/>
                     <span>
                       <strong>{portal.business_name}</strong>
                       <small>Customer account statement</small>
@@ -855,7 +855,7 @@ function PortalLogin({
     <main className="client-login-page client-login-page--premium">
       <section>
         <span className="brand">
-          <span className="brand-mark">L</span>LemonBooks
+          <img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/>LemonBooks
         </span>
         <div className="client-login-copy">
           <p className="eyebrow">CUSTOMER PORTAL</p>

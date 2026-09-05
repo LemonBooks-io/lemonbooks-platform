@@ -39,7 +39,7 @@ export function AuthPage() {
   return (
     <main className="auth-page">
       <section className="auth-story">
-        <a className="brand brand--light" href="/" aria-label="LemonBooks home"><span className="brand-mark">L</span><span>LemonBooks</span></a>
+        <a className="brand brand--light" href="/" aria-label="LemonBooks home"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><span>LemonBooks</span></a>
         <div className="auth-story__content">
           <p className="eyebrow eyebrow--light">BUILT FOR HOW BUSINESS REALLY HAPPENS</p>
           <h1>Every payment.<br />One clear picture.</h1>
@@ -72,7 +72,7 @@ export function AuthPage() {
             </>
           ) : (
             <>
-              <div className="mobile-brand"><span className="brand-mark">L</span><strong>LemonBooks</strong></div>
+              <div className="mobile-brand"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><strong>LemonBooks</strong></div>
               <p className="eyebrow">{signup ? "START YOUR BUSINESS WORKSPACE" : "WELCOME BACK"}</p>
               <h2>{signup ? "Create your business account" : "Sign in to LemonBooks"}</h2>
               <p className="muted">{signup ? "No administrator needed. Your workspace is created as soon as you verify your email." : "Continue to your business workspace."}</p>

@@ -3,7 +3,7 @@ import { ArrowLeft2, Message, ShieldTick, TickCircle, Trash } from "iconsax-reac
 export function DataDeletionPage() {
   return <main className="policy-page">
     <header className="policy-header">
-      <a className="brand" href="/"><span className="brand-mark">L</span><span>LemonBooks</span></a>
+      <a className="brand" href="/"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><span>LemonBooks</span></a>
       <nav><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/data-deletion" aria-current="page">Data deletion</a></nav>
       <a href="mailto:privacy@lemonbooks.io">privacy@lemonbooks.io</a>
     </header>

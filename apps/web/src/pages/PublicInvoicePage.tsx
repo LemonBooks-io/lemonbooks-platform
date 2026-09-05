@@ -298,7 +298,7 @@ export function PublicInvoicePage() {
     <main className="public-invoice-shell">
       <header className="public-invoice-header">
         <span className="brand">
-          <span className="brand-mark">L</span>LemonBooks
+          <img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/>LemonBooks
         </span>
         <span className="secure-label">
           <Lock1 size={14} />

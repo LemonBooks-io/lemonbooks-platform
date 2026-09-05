@@ -10,7 +10,7 @@ const capabilities = [
 export function PublicSitePage() {
   return <main className="site-page">
     <header className="site-nav">
-      <a className="brand" href="/" aria-label="LemonBooks home"><span className="brand-mark">L</span><span>LemonBooks</span></a>
+      <a className="brand" href="/" aria-label="LemonBooks home"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><span>LemonBooks</span></a>
       <nav aria-label="Main navigation"><a href="#product">Product</a><a href="#how-it-works">How it works</a><a href="#security">Security</a></nav>
       <div><a className="site-link" href="/login">Sign in</a><a className="site-button site-button--small" href="/login?mode=signup">Get started <ArrowRight2 size={17}/></a></div>
     </header>
@@ -51,6 +51,6 @@ export function PublicSitePage() {
 
     <section className="site-cta"><p className="site-kicker">A CLEARER BUSINESS STARTS HERE</p><h2>Bring every moving part<br/>into one dependable view.</h2><p>Set up your LemonBooks workspace and build a cleaner operating rhythm from day one.</p><a className="site-button" href="/login?mode=signup">Create your workspace <ArrowRight2 size={19}/></a></section>
 
-    <footer className="site-footer"><div><a className="brand brand--light" href="/"><span className="brand-mark">L</span><span>LemonBooks</span></a><p>Financial operations and reconciliation for ambitious businesses.</p></div><div><strong>Product</strong><a href="#product">Capabilities</a><a href="#how-it-works">How it works</a><a href="/login">Sign in</a></div><div><strong>Legal</strong><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a><a href="/data-deletion">Data deletion</a></div><div><strong>Support</strong><a href="mailto:support@lemonbooks.io">Contact support</a><a href="mailto:privacy@lemonbooks.io">Privacy contact</a></div><small>© 2026 LemonBooks. All rights reserved.</small></footer>
+    <footer className="site-footer"><div><a className="brand brand--light" href="/"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><span>LemonBooks</span></a><p>Financial operations and reconciliation for ambitious businesses.</p></div><div><strong>Product</strong><a href="#product">Capabilities</a><a href="#how-it-works">How it works</a><a href="/login">Sign in</a></div><div><strong>Legal</strong><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a><a href="/data-deletion">Data deletion</a></div><div><strong>Support</strong><a href="mailto:support@lemonbooks.io">Contact support</a><a href="mailto:privacy@lemonbooks.io">Privacy contact</a></div><small>© 2026 LemonBooks. All rights reserved.</small></footer>
   </main>;
 }

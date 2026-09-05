@@ -19,7 +19,7 @@ export function WhatsAppEntryPage() {
     return () => { current = false; };
   }, [revision, session]);
 
-  if (connection === undefined) return <div className="app-loading"><span className="brand-mark">L</span><p>Loading WhatsApp…</p></div>;
+  if (connection === undefined) return <div className="app-loading"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt="LemonBooks"/><p>Loading WhatsApp…</p></div>;
   if (!connection || connection.status !== "active" || connection.environment !== "production") return <MetaWhatsAppConnectPage onConnected={() => setRevision(value => value + 1)} />;
   return <WhatsAppPage />;
 }

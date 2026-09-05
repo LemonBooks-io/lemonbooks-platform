@@ -21,7 +21,7 @@ export function OnboardingPage() {
     finally { setBusy(false); }
   }
   return <main className="onboarding-page">
-    <header className="onboarding-header"><span className="brand-mark">L</span><strong>LemonBooks</strong><span className="step-label">Workspace setup · 1 of 1</span></header>
+    <header className="onboarding-header"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt="LemonBooks"/><strong>LemonBooks</strong><span className="step-label">Workspace setup · 1 of 1</span></header>
     <section className="onboarding-layout">
       <div className="onboarding-copy">
         <p className="eyebrow">MAKE LEMONBOOKS YOURS</p><h1>A few details, then you’re ready.</h1>

@@ -2,7 +2,7 @@ import { ArrowLeft2, DocumentText, Message, ShieldTick, TickCircle } from "icons
 
 export function TermsPage() {
   return <main className="policy-page">
-    <header className="policy-header"><a className="brand" href="/"><span className="brand-mark">L</span><span>LemonBooks</span></a><nav><a href="/privacy">Privacy</a><a href="/terms" aria-current="page">Terms</a><a href="/data-deletion">Data deletion</a></nav><a href="mailto:legal@lemonbooks.io">legal@lemonbooks.io</a></header>
+    <header className="policy-header"><a className="brand" href="/"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><span>LemonBooks</span></a><nav><a href="/privacy">Privacy</a><a href="/terms" aria-current="page">Terms</a><a href="/data-deletion">Data deletion</a></nav><a href="mailto:legal@lemonbooks.io">legal@lemonbooks.io</a></header>
     <section className="policy-hero"><span className="policy-icon"><DocumentText size={26}/></span><p className="eyebrow">LEMONBOOKS SERVICE TERMS</p><h1>Terms of service</h1><p>These terms govern access to LemonBooks and set clear responsibilities for using our financial operations, messaging, and integration services.</p><small>Effective and last updated: September 5, 2026</small></section>
     <div className="policy-layout">
       <aside><strong>On this page</strong><a href="#agreement">Agreement</a><a href="#accounts">Accounts</a><a href="#services">Using the Services</a><a href="#financial">Financial information</a><a href="#integrations">Connected services</a><a href="#content">Business data</a><a href="#fees">Fees</a><a href="#availability">Availability</a><a href="#termination">Termination</a><a href="#liability">Liability</a><a href="#contact">Contact</a></aside>

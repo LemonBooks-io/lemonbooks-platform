@@ -2,7 +2,7 @@ import { ArrowLeft2, Lock1, Message, ShieldTick, TickCircle } from "iconsax-reac
 
 export function PrivacyPolicyPage() {
   return <main className="policy-page">
-    <header className="policy-header"><a className="brand" href="/"><span className="brand-mark">L</span><span>LemonBooks</span></a><nav><a href="/privacy" aria-current="page">Privacy</a><a href="/terms">Terms</a><a href="/data-deletion">Data deletion</a></nav><a href="mailto:privacy@lemonbooks.io">privacy@lemonbooks.io</a></header>
+    <header className="policy-header"><a className="brand" href="/"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><span>LemonBooks</span></a><nav><a href="/privacy" aria-current="page">Privacy</a><a href="/terms">Terms</a><a href="/data-deletion">Data deletion</a></nav><a href="mailto:privacy@lemonbooks.io">privacy@lemonbooks.io</a></header>
     <section className="policy-hero"><span className="policy-icon"><Lock1 size={26}/></span><p className="eyebrow">PRIVACY AT LEMONBOOKS</p><h1>Privacy policy</h1><p>This policy explains what information LemonBooks collects, why we use it, how we protect it, and the choices available to you.</p><small>Effective and last updated: September 5, 2026</small></section>
     <div className="policy-layout">
       <aside><strong>On this page</strong><a href="#scope">Scope</a><a href="#collect">Information we collect</a><a href="#use">How we use information</a><a href="#sharing">How information is shared</a><a href="#whatsapp">WhatsApp and integrations</a><a href="#retention">Retention and security</a><a href="#rights">Your rights</a><a href="#contact">Contact us</a></aside>

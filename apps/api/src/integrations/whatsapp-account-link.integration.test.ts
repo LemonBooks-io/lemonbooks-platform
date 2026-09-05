@@ -1,0 +1,142 @@
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import test from "node:test";
+import { Client } from "pg";
+import nodemailer from "nodemailer";
+
+test("WhatsApp signup, authenticated linking, replay protection and confirmation delivery", { skip: process.env.RUN_DB_TESTS !== "1" }, async () => {
+  const schema = `wa_link_test_${crypto.randomBytes(8).toString("hex")}`;
+  process.env.PGOPTIONS = `-c search_path=${schema},public`;
+  const { env } = await import("../config");
+  const admin = new Client({ connectionString: env.databaseUrl });
+  const { pool, query, transaction } = await import("../database/pool");
+  const originalFetch = globalThis.fetch;
+  const originalTransport = nodemailer.createTransport;
+  await admin.connect();
+  await admin.query(`CREATE SCHEMA ${schema}`);
+  try {
+    const { migrate } = await import("../database/migrate");
+    await migrate();
+    const links = await import("../services/whatsapp-account-link.service");
+    const auth = await import("../services/auth.service");
+    const { encryptMetaCredentials } = await import("../services/meta-whatsapp.service");
+    const { metaWebhookReceiver } = await import("../routes/meta-whatsapp-webhook");
+    Object.assign(env.whatsapp, { appSecret: "test-signing-secret", credentialsKey: crypto.randomBytes(32).toString("base64") });
+    Object.assign(env.smtp, { host: "smtp.example.test", user: "test", pass: "test" });
+    env.publicWebUrl = "https://www.lemonbooks.io";
+    let otp = "";
+    nodemailer.createTransport = (() => ({ sendMail: async (mail: { subject: string }) => { otp = mail.subject.slice(0, 6); } })) as unknown as typeof nodemailer.createTransport;
+    const sent: string[] = [];
+    let failMeta = false;
+    globalThis.fetch = async (url, init) => {
+      assert.match(String(url), /^https:\/\/graph.facebook.com\//);
+      if (failMeta) throw new Error("simulated provider outage");
+      sent.push(JSON.parse(String(init?.body)).text.body);
+      return new Response(JSON.stringify({ messages: [{ id: `wamid.test.${sent.length}` }] }), { status: 200 });
+    };
+    const business = (await query<{ id: string }>("INSERT INTO businesses(name,email,tenant_slug) VALUES('Platform','platform@example.test','platform') RETURNING id"))[0]!;
+    const connection = (await query<{ id: string }>(`INSERT INTO integration_connections(business_id,kind,provider,status,environment,external_account_id,capabilities,encrypted_credentials)
+      VALUES($1,'whatsapp','meta_whatsapp','active','production','123','{"platformEntryPoint":true}',$2) RETURNING id`, [business.id, encryptMetaCredentials({ accessToken: "test-token" })]))[0]!;
+    async function inbound(body: string, id: string = crypto.randomUUID()) {
+      const payload = { entry: [{ changes: [{ value: { metadata: { phone_number_id: "123" }, contacts: [{ profile: { name: "Ada" } }],
+        messages: [{ id, from: "15555550100", timestamp: String(Math.floor(Date.now() / 1000)), type: "text", text: { body } }] } }] }] };
+      const rawBody = Buffer.from(JSON.stringify(payload));
+      let status = 0; let error: unknown;
+      await metaWebhookReceiver({ body: payload, rawBody, headers: { "x-hub-signature-256": `sha256=${crypto.createHmac("sha256", env.whatsapp.appSecret).update(rawBody).digest("hex")}` } } as any,
+        { sendStatus: (code: number) => { status = code; } } as any, e => { error = e; });
+      if (error) throw error;
+      assert.equal(status, 200);
+    }
+    await inbound("REGISTER", "first-message");
+    const linkUrl = sent.at(-1)!.match(/https:\/\/\S+/)![0];
+    const token = new URLSearchParams(new URL(linkUrl).hash.slice(1)).get("whatsapp_link")!;
+    assert.equal(token.length, 64);
+    assert.equal(new URL(linkUrl).searchParams.has("whatsapp_link"), false);
+    await inbound("REGISTER", "first-message");
+    assert.equal(sent.length, 1, "duplicate webhook does not issue another link");
+    const stored = (await query<{ body: string }>("SELECT body FROM whatsapp_messages WHERE direction='outbound'"))[0]!;
+    assert.ok(!stored.body.includes(token), "link secret is redacted in inbox storage");
+    const challenge = await auth.startSignup({ name: "Ada", businessName: "Ada Shop", email: "ada@example.test", password: "test-password-123", whatsappLinkToken: token });
+    assert.equal((await query("SELECT * FROM whatsapp_account_links")).length, 0, "unverified signup cannot link");
+    await assert.rejects(auth.verifySignup(challenge.challengeId, "wrong"));
+    const registered = await auth.verifySignup(challenge.challengeId, otp);
+    assert.equal(registered.whatsappLink?.status, "linked");
+    assert.equal((await query("SELECT * FROM whatsapp_link_notifications")).length, 1);
+    await assert.rejects(auth.verifySignup(challenge.challengeId, otp), "OTP cannot be reused");
+    const { rows: [binding] } = await pool.query("SELECT * FROM whatsapp_account_links");
+    assert.equal(binding.business_id, registered.business.id);
+    const replay = await transaction(c => links.completeWhatsAppLink(c, links.hashWhatsAppLink(token), binding.user_id, binding.business_id));
+    assert.equal(replay.status, "unavailable");
+    const otherChallenge = await auth.startSignup({ name: "Other", businessName: "Other Shop", email: "other@example.test", password: "other-password-123" });
+    const other = await auth.verifySignup(otherChallenge.challengeId, otp);
+    const { rows: [conversationForCollision] } = await pool.query("SELECT id FROM whatsapp_conversations");
+    const collisionUrl = await links.createWhatsAppLink(binding.contact_id, conversationForCollision.id);
+    const collisionToken = new URLSearchParams(new URL(collisionUrl).hash.slice(1)).get("whatsapp_link")!;
+    const collision = await transaction(c => links.completeWhatsAppLink(c, links.hashWhatsAppLink(collisionToken), other.user.id, String(other.business.id)));
+    assert.equal(collision.status, "unavailable", "a different authenticated account cannot reassign this sender");
+    assert.equal((await query<{ business_id: string }>("SELECT business_id FROM whatsapp_account_links"))[0]!.business_id, binding.business_id);
+    failMeta = true;
+    await links.processWhatsAppLinkNotifications();
+    assert.equal((await query<{ attempts: number }>("SELECT attempts FROM whatsapp_link_notifications"))[0]!.attempts, 1);
+    failMeta = false;
+    await query("UPDATE whatsapp_link_notifications SET next_attempt_at=now()");
+    await Promise.all([links.processWhatsAppLinkNotifications(), links.processWhatsAppLinkNotifications()]);
+    assert.equal(sent.filter(s => s.includes("is ready and linked")).length, 1);
+    await inbound("HELP");
+    assert.match(sent.at(-1)!, /connected to Ada Shop/);
+    await inbound("UNLINK");
+    assert.equal((await query("SELECT * FROM whatsapp_account_links")).length, 0);
+    await inbound("CONNECT");
+    const loginToken = new URLSearchParams(new URL(sent.at(-1)!.match(/https:\/\/\S+/)![0]).hash.slice(1)).get("whatsapp_link")!;
+    await assert.rejects(auth.login("ada@example.test", "wrong-password", undefined, loginToken));
+    assert.equal((await query("SELECT * FROM whatsapp_account_links")).length, 0);
+    const loggedIn = await auth.login("ada@example.test", "test-password-123", undefined, loginToken);
+    assert.equal(loggedIn.whatsappLink?.status, "linked");
+    const { rows: [conversationForWindow] } = await pool.query("SELECT id FROM whatsapp_conversations");
+    await query("UPDATE whatsapp_contacts SET service_window_expires_at=now()-interval '1 second'");
+    const beforeClosedWindow = sent.length;
+    await links.processWhatsAppLinkNotifications();
+    assert.equal(sent.length, beforeClosedWindow, "closed service window prevents free-form confirmation");
+    const anotherUrl = await links.createWhatsAppLink(binding.contact_id, conversationForWindow.id);
+    const anotherToken = new URLSearchParams(new URL(anotherUrl).hash.slice(1)).get("whatsapp_link")!;
+    await transaction(c => links.completeWhatsAppLink(c, links.hashWhatsAppLink(anotherToken), binding.user_id, binding.business_id));
+    await inbound("STOP");
+    const before = sent.length;
+    await links.processWhatsAppLinkNotifications();
+    await inbound("HELP");
+    assert.equal(sent.length, before, "opt-out suppresses confirmation and help");
+    assert.ok((await query<{ state: string }>("SELECT state FROM whatsapp_link_notifications")).every(j => j.state === "suppressed"));
+    // A revoked membership no longer resolves a workspace.
+    await query("DELETE FROM memberships WHERE business_id=$1 AND user_id=$2", [binding.business_id, binding.user_id]);
+    assert.equal(await links.getWhatsAppLinkedWorkspace(binding.contact_id), undefined);
+    await query("INSERT INTO memberships(business_id,user_id,role) VALUES($1,$2,'owner')", [binding.business_id, binding.user_id]);
+    // Invalid and expired tickets cannot authorize linking.
+    assert.equal(links.hashWhatsAppLink("tampered"), null);
+    await query("UPDATE whatsapp_contacts SET consent_state='opted_in'");
+    const conversation = (await query<{ id: string }>("SELECT id FROM whatsapp_conversations"))[0]!;
+    const fresh = await links.createWhatsAppLink(binding.contact_id, conversation.id);
+    const freshToken = new URLSearchParams(new URL(fresh).hash.slice(1)).get("whatsapp_link")!;
+    await query("UPDATE whatsapp_account_link_tickets SET expires_at=now()-interval '1 minute'");
+    assert.equal((await transaction(c => links.completeWhatsAppLink(c, links.hashWhatsAppLink(freshToken), binding.user_id, binding.business_id))).status, "unavailable");
+    const oldUrl = await links.createWhatsAppLink(binding.contact_id, conversation.id);
+    const oldToken = new URLSearchParams(new URL(oldUrl).hash.slice(1)).get("whatsapp_link")!;
+    const currentUrl = await links.createWhatsAppLink(binding.contact_id, conversation.id);
+    const currentToken = new URLSearchParams(new URL(currentUrl).hash.slice(1)).get("whatsapp_link")!;
+    assert.equal((await transaction(c => links.completeWhatsAppLink(c, links.hashWhatsAppLink(oldToken), binding.user_id, binding.business_id))).status, "unavailable", "issuing a new link invalidates the previous one");
+    const simultaneous = await Promise.all([0, 1].map(() => transaction(c => links.completeWhatsAppLink(c, links.hashWhatsAppLink(currentToken), binding.user_id, binding.business_id))));
+    assert.equal(simultaneous.filter(r => r.status === "linked").length, 1, "concurrent redemption links once");
+    await inbound("STOP");
+    const beforeUnlink = sent.length;
+    await inbound("UNLINK");
+    assert.equal(sent.length, beforeUnlink);
+    assert.equal((await query("SELECT * FROM whatsapp_account_links")).length, 0, "opted-out contacts can still unlink without receiving a reply");
+    assert.equal((await query("SELECT id FROM invoices")).length, 0, "linking never posts invoices");
+    assert.ok(connection.id);
+  } finally {
+    globalThis.fetch = originalFetch;
+    nodemailer.createTransport = originalTransport;
+    await pool.end();
+    await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+    await admin.end();
+  }
+});

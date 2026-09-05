@@ -5,8 +5,9 @@ import { query, transaction } from "../database/pool";
 import { HttpError } from "../http";
 import { createSessionToken } from "../middleware/auth";
 import { emailConfigured, sendCustomerAccessCode } from "./email.service";
+import { completeWhatsAppLink, hashWhatsAppLink } from "./whatsapp-account-link.service";
 
-type SignupInput = { name: string; email: string; password: string; businessName: string };
+type SignupInput = { name: string; email: string; password: string; businessName: string; whatsappLinkToken?: string };
 type Challenge = { id: string; tenant_slug: string; expires_at: Date };
 
 function slugify(value: string): string {
@@ -56,7 +57,8 @@ export async function startSignup(input: SignupInput) {
     `INSERT INTO signup_challenges (email, tenant_slug, payload, otp_hash, expires_at)
      VALUES ($1,$2,$3::jsonb,$4,now() + ($5 || ' minutes')::interval)
      RETURNING id, tenant_slug, expires_at`,
-    [email, tenantSlug, JSON.stringify({ name, email, businessName, passwordHash }), otpHash, env.otpTtlMinutes],
+    [email, tenantSlug, JSON.stringify({ name, email, businessName, passwordHash,
+      whatsappLinkHash: hashWhatsAppLink(input.whatsappLinkToken), whatsappLinkRequested: Boolean(input.whatsappLinkToken) }), otpHash, env.otpTtlMinutes],
   );
   const challenge = rows[0]!;
 
@@ -71,7 +73,7 @@ export async function startSignup(input: SignupInput) {
 }
 
 export async function verifySignup(challengeId: string, otp: string) {
-  const challenges = await query<{ id: string; email: string; tenant_slug: string; payload: SignupInput & { passwordHash: string }; otp_hash: string; attempts: number }>(
+  const challenges = await query<{ id: string; email: string; tenant_slug: string; payload: SignupInput & { passwordHash: string; whatsappLinkHash?: string; whatsappLinkRequested?: boolean }; otp_hash: string; attempts: number }>(
     "SELECT * FROM signup_challenges WHERE id=$1 AND expires_at > now()", [challengeId],
   );
   const challenge = challenges[0];
@@ -83,6 +85,8 @@ export async function verifySignup(challengeId: string, otp: string) {
   }
 
   return transaction(async (client: PoolClient) => {
+    const locked = await client.query("SELECT id FROM signup_challenges WHERE id=$1 AND expires_at>now() FOR UPDATE", [challenge.id]);
+    if (!locked.rows.length) throw new HttpError(410, "This verification code has expired or was already used. Sign in or start again.");
     const payload = challenge.payload;
     const businessResult = await client.query(
       `INSERT INTO businesses (tenant_slug,name,email) VALUES ($1,$2,$3) RETURNING *`,
@@ -95,13 +99,15 @@ export async function verifySignup(challengeId: string, otp: string) {
     );
     const user = userResult.rows[0];
     await client.query("INSERT INTO memberships (business_id,user_id,role,permissions) VALUES ($1,$2,'owner','[\"all\"]')", [business.id, user.id]);
+    const whatsappLink = payload.whatsappLinkRequested
+      ? await completeWhatsAppLink(client, payload.whatsappLinkHash ?? null, user.id, business.id) : undefined;
     await client.query("DELETE FROM signup_challenges WHERE id=$1", [challenge.id]);
     const token = createSessionToken({ sub: user.id, businessId: business.id, tenantSlug: business.tenant_slug, role: "owner" });
-    return { token, user: { ...user, role: "owner" }, business: publicBusiness(business), nextStep: "business-profile" };
+    return { token, user: { ...user, role: "owner" }, business: publicBusiness(business), nextStep: "business-profile", whatsappLink };
   });
 }
 
-export async function login(emailInput: string, password: string, tenantInput?: string) {
+export async function login(emailInput: string, password: string, tenantInput?: string, whatsappLinkToken?: string) {
   const email = emailInput?.trim().toLowerCase();
   const tenant = tenantInput?.trim().toLowerCase();
   const rows = await query<Record<string, any>>(
@@ -113,8 +119,9 @@ export async function login(emailInput: string, password: string, tenantInput?: 
   if (!rows[0] || !(await bcrypt.compare(password, rows[0].password_hash))) throw new HttpError(401, "Email or password is incorrect");
   if (!tenant && rows.length > 1) throw new HttpError(409, "Choose a business workspace to continue", "TENANT_REQUIRED");
   const row = rows[0];
+  const whatsappLink = whatsappLinkToken ? await transaction(client => completeWhatsAppLink(client, hashWhatsAppLink(whatsappLinkToken), row.user_id, row.id)) : undefined;
   const token = createSessionToken({ sub: row.user_id, businessId: row.id, tenantSlug: row.tenant_slug, role: row.role });
-  return { token, user: { id: row.user_id, email: row.email, name: row.name, role: row.role }, business: publicBusiness(row) };
+  return { token, user: { id: row.user_id, email: row.email, name: row.name, role: row.role }, business: publicBusiness(row), whatsappLink };
 }
 
 export { publicBusiness, slugify };

@@ -1,4 +1,5 @@
 import { pool } from "./pool";
+import { whatsappLinkSchema } from "./whatsapp-link-schema";
 
 const schema = `
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -442,4 +443,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS reconciliation_approvals_pending_idx ON reconc
 
 export async function migrate(): Promise<void> {
   await pool.query(schema);
+  await pool.query(whatsappLinkSchema);
 }

@@ -1,19 +1,22 @@
 import { env } from "../config";
 import { query } from "../database/pool";
 import { encryptMetaCredentials } from "./meta-whatsapp.service";
+import { createWhatsAppLink, getWhatsAppLinkedWorkspace, unlinkWhatsAppAccount } from "./whatsapp-account-link.service";
 
 export type PlatformReplyInput = {
   body: string;
   displayName?: string | null;
   publicWebUrl: string;
+  registrationUrl?: string;
+  workspaceName?: string;
 };
 
 export function platformReplyFor(input: PlatformReplyInput): string | null {
   const body = input.body.trim();
-  const lower = body.toLowerCase();
   if (/^(stop|unsubscribe|opt\s*out)$/i.test(body)) return null;
-  if (/\b(register|sign\s*up|create\s+(?:an?\s+)?account|get\s+started)\b/i.test(body)) {
-    return `Create your secure LemonBooks workspace here: ${input.publicWebUrl}/login?mode=signup&utm_source=whatsapp\n\nWe will verify your email with a one-time code. Never send passwords, card PINs, or OTPs in this chat.`;
+  if (isAccountCommand(body)) {
+    if (input.workspaceName) return `This WhatsApp number is connected to ${input.workspaceName}. Reply HELP to continue, or UNLINK to disconnect before connecting another account.`;
+    return `Create a workspace or sign in to an existing account to connect this WhatsApp number:\n${input.registrationUrl ?? `${input.publicWebUrl}/login?mode=signup`}\n\nYour private link expires in 30 minutes. Do not forward it. We will confirm here after you finish. Never send passwords, card PINs, or OTPs in this chat.`;
   }
   if (/\b(paid|payment|transfer|transferred|receipt)\b/i.test(body)) {
     return "Thanks — I captured your payment message for review. A payment is not marked as confirmed until LemonBooks matches it to provider or bank evidence. Include the invoice number and amount if available.";
@@ -22,7 +25,26 @@ export function platformReplyFor(input: PlatformReplyInput): string | null {
     return "I captured your business request as a draft for review. Please include the customer or supplier, item, quantity, amount, and invoice/reference where available. LemonBooks will ask for confirmation before posting a financial or inventory record.";
   }
   const greeting = input.displayName ? `Hi ${input.displayName}` : "Hi";
-  return `${greeting} — welcome to LemonBooks.\n\nReply with:\n• REGISTER to create a workspace\n• INVOICE or ORDER to capture a business request\n• PAYMENT to report payment evidence\n• HELP to see this menu again\n\nLemonBooks will not post financial records without confirmation.`;
+  return `${greeting} — ${input.workspaceName ? `you are connected to ${input.workspaceName}.` : "welcome to LemonBooks."}\n\nReply with:\n${input.workspaceName ? "• UNLINK to disconnect your account" : "• REGISTER to create a workspace\n• CONNECT to link an existing account"}\n• INVOICE or ORDER to capture a business request\n• PAYMENT to report payment evidence\n• HELP to see this menu again\n\nLemonBooks will not post financial records without confirmation.`;
+}
+
+function isAccountCommand(body: string) {
+  return /^(register|sign\s*up|create\s+(?:an?\s+)?account|get\s+started|connect|link|login|sign\s*in)$/i.test(body.trim());
+}
+
+export async function linkedPlatformReply(input: PlatformReplyInput & { contactId: string; conversationId: string }) {
+  if (/^unlink$/i.test(input.body.trim())) {
+    await unlinkWhatsAppAccount(input.contactId);
+    return "Your WhatsApp number has been disconnected from your LemonBooks account. Your business records are unchanged. Reply CONNECT to link an account again.";
+  }
+  const workspace = await getWhatsAppLinkedWorkspace(input.contactId);
+  const registrationUrl = !workspace && isAccountCommand(input.body)
+    ? await createWhatsAppLink(input.contactId, input.conversationId) : undefined;
+  const reply = platformReplyFor({ ...input, registrationUrl, workspaceName: workspace?.name });
+  if (workspace && reply && !isAccountCommand(input.body) && /\b(invoice|order|sale|expense|stock|inventory|restock|record|paid|payment|transfer|transferred|receipt)\b/i.test(input.body)) {
+    return `Workspace: ${workspace.name}\n\n${reply}`;
+  }
+  return reply;
 }
 
 export async function provisionWhatsAppPlatformConnection() {

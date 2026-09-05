@@ -5,7 +5,8 @@ import { query, transaction } from "../database/pool";
 import { HttpError } from "../http";
 import { extractBusinessSignals } from "../services/whatsapp.service";
 import { decryptMetaCredentials, sendMetaMessage } from "../services/meta-whatsapp.service";
-import { platformReplyFor } from "../services/whatsapp-platform.service";
+import { linkedPlatformReply } from "../services/whatsapp-platform.service";
+import { unlinkWhatsAppAccount } from "../services/whatsapp-account-link.service";
 
 export function metaWebhookVerification(req: Request, res: Response) {
   if (!env.whatsapp.verifyToken || String(req.query["hub.verify_token"] ?? "") !== env.whatsapp.verifyToken) return res.sendStatus(403);
@@ -51,14 +52,18 @@ async function ingestMessage(connection: Record<string, any>, message: Record<st
     await client.query("UPDATE integration_connections SET last_success_at=now(),last_error_code=NULL,updated_at=now() WHERE id=$1", [connection.id]);
     return { conversationId: conversation.id, contactId: contact.id, phone, consentState: contact.consent_state };
   });
-  if (!ingested || ingested.consentState === "opted_out" || !isPlatformConnection(connection)) return;
-  const reply = platformReplyFor({ body, displayName: profile?.profile?.name, publicWebUrl: env.publicWebUrl });
-  if (!reply) return;
+  if (!ingested || !isPlatformConnection(connection)) return;
+  if (ingested.consentState === "opted_out") {
+    if (/^unlink$/i.test(body.trim())) await unlinkWhatsAppAccount(ingested.contactId);
+    return;
+  }
   try {
+    const reply = await linkedPlatformReply({ body, contactId: ingested.contactId, conversationId: ingested.conversationId, displayName: profile?.profile?.name, publicWebUrl: env.publicWebUrl });
+    if (!reply) return;
     const credentials = decryptMetaCredentials(String(connection.encrypted_credentials ?? ""));
     const providerId = await sendMetaMessage({ accessToken: credentials.accessToken, phoneNumberId: String(connection.external_account_id), to: ingested.phone, body: reply });
     await transaction(async client => {
-      await client.query(`INSERT INTO whatsapp_messages(business_id,conversation_id,provider_message_id,direction,message_type,body,provider_status,reply_to_provider_id,occurred_at) VALUES($1,$2,$3,'outbound','text',$4,'accepted',$5,now()) ON CONFLICT(business_id,provider_message_id) DO NOTHING`, [connection.business_id, ingested.conversationId, providerId, reply, message.id]);
+      await client.query(`INSERT INTO whatsapp_messages(business_id,conversation_id,provider_message_id,direction,message_type,body,provider_status,reply_to_provider_id,occurred_at) VALUES($1,$2,$3,'outbound','text',$4,'accepted',$5,now()) ON CONFLICT(business_id,provider_message_id) DO NOTHING`, [connection.business_id, ingested.conversationId, providerId, reply.replace(/whatsapp_link=[a-f0-9]{64}/g, "whatsapp_link=[private link]"), message.id]);
       await client.query("UPDATE whatsapp_conversations SET state='awaiting_customer',last_outbound_at=now(),updated_at=now() WHERE id=$1", [ingested.conversationId]);
     });
     console.log(`WhatsApp platform reply accepted for conversation ${ingested.conversationId}`);

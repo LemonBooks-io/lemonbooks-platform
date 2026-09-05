@@ -27,7 +27,7 @@ Implemented and locally testable:
 - Operator retry/dead-letter views for integration jobs and transactional outbox messages, with explicit idempotent replay actions.
 - Scheduled overdue-state detection and idempotent `invoice.overdue` events for downstream WhatsApp reminder automation.
 - Opt-in PostgreSQL tests covering concurrent duplicate delivery, concurrent posting, tenant isolation, inventory posting, and dead-letter exhaustion (`RUN_DB_TESTS=1`).
-- A separately designated LemonBooks-owned WhatsApp entry point can be provisioned at startup against an existing platform tenant. Valid signed inbound messages are stored and receive deterministic welcome, registration, payment-claim, and draft-record guidance. Customer-owned WhatsApp connections remain inbox-only and are never opted into platform auto-replies implicitly.
+- A separately designated LemonBooks-owned WhatsApp entry point can be provisioned at startup against an existing platform tenant. Valid signed inbound messages are stored and receive deterministic welcome, registration, payment-claim, and draft-record guidance. Single-use WhatsApp links connect verified signup or authenticated existing accounts to the sender; durable confirmation jobs, workspace-aware help, and UNLINK are implemented. Customer-owned WhatsApp connections are never opted into platform auto-replies implicitly.
 
 Still dependent on external approval or follow-up hardening:
 
@@ -1255,9 +1255,9 @@ The inbox shows customer context, open invoices, payment evidence, order drafts,
 
 At minimum configure and validate on startup:
 
-- `WHATSAPP_META_APP_ID`
-- `WHATSAPP_META_APP_SECRET`
-- `WHATSAPP_META_CONFIG_ID`
+- `META_APP_ID`
+- `WHATSAPP_APP_SECRET` (or `META_APP_SECRET`)
+- `META_WHATSAPP_CONFIG_ID`
 - separate Coexistence configuration/feature setting when used
 - pinned supported Graph API version
 - webhook verification secret
@@ -1353,8 +1353,8 @@ This connection is distinct from merchant Embedded Signup. It lets a prospective
 ### Required production environment
 
 ```dotenv
-WHATSAPP_META_APP_ID=848510244918866
-WHATSAPP_META_APP_SECRET=<Meta app secret>
+META_APP_ID=848510244918866
+WHATSAPP_APP_SECRET=<Meta app secret; META_APP_SECRET is also supported>
 WHATSAPP_WEBHOOK_VERIFY_TOKEN=<strong private random value shared only with Meta>
 WHATSAPP_PLATFORM_TENANT_SLUG=<existing internal LemonBooks tenant slug>
 WHATSAPP_PLATFORM_WABA_ID=1059428370199321
@@ -1383,7 +1383,8 @@ sudo tail -f /var/log/nginx/access.log | grep --line-buffered '/api/v3/webhooks/
 
 ### Initial conversation behavior
 
-- `REGISTER`, `SIGN UP`, `CREATE ACCOUNT`, or `GET STARTED` returns the HTTPS LemonBooks signup link; account verification continues in the existing one-time-code web flow. Passwords and OTPs must never be collected in WhatsApp.
+- `REGISTER`, `SIGN UP`, `CREATE ACCOUNT`, `GET STARTED`, `CONNECT`, `LINK`, `LOGIN`, or `SIGN IN` returns a private, single-use HTTPS link expiring after 30 minutes. The recipient can choose signup or existing-account sign-in. Signup links only after email OTP verification; existing accounts link only after successful authentication and a verified email. The web form explicitly requests consent to connect the number that received the link. Passwords and OTPs are never collected in WhatsApp.
+- Successful linking queues a WhatsApp confirmation in the same database transaction. `HELP` and subsequent requests recognize the linked workspace. `UNLINK` deletes the account association, cancels its pending confirmations, and invalidates outstanding links; business records remain intact. Changing accounts requires UNLINK first.
 - `INVOICE`, `ORDER`, `SALE`, `EXPENSE`, `STOCK`, `INVENTORY`, `RESTOCK`, or `RECORD` stores the inbound request and identifies it explicitly as a draft awaiting review.
 - `PAID`, `PAYMENT`, `TRANSFER`, `TRANSFERRED`, or `RECEIPT` stores evidence and states explicitly that payment remains unconfirmed until matched to authoritative provider/bank evidence.
 - `STOP`, `UNSUBSCRIBE`, or `OPT OUT` records opt-out and suppresses the reply.
@@ -1395,7 +1396,7 @@ Only a connection carrying `capabilities.platformEntryPoint=true` may use these 
 
 1. Restart and confirm the platform-connection startup line.
 2. Send `HELP` from an authorized real WhatsApp account and confirm one inbound webhook HTTP 200, one stored inbound message, and one accepted reply.
-3. Send `REGISTER` and confirm the link opens the production OTP signup flow.
+3. Send `REGISTER`, follow the private link, consent to linking, and complete OTP signup. Confirm the web success screen and WhatsApp confirmation. Existing users should choose Sign in instead of registering again. Old generic signup links cannot connect a conversation retroactively: send CONNECT for a fresh link.
 4. Send a payment claim and verify the response never says paid, settled, reconciled, or confirmed.
 5. Send `STOP`, then another message, and verify automation remains suppressed.
 6. Confirm the conversation appears in the tenant's LemonBooks WhatsApp inbox with inbound/outbound provider states.
@@ -1403,4 +1404,13 @@ Only a connection carrying `capabilities.platformEntryPoint=true` may use these 
 
 ### Deliberately deferred lifecycle
 
-Conversational messages do not yet create authenticated accounting records. Production record creation requires identity/account linking, explicit confirmation, validated structured commands, domain-service execution, idempotency, audit, and merchant/human review as specified in sections 35 and 36. Merchant self-service WhatsApp connection continues to use Embedded Signup; the platform-number token must never be reused as a merchant credential.
+Account linking is implemented; conversational messages do not yet create accounting records. Record creation still requires explicit confirmation, validated structured commands, domain-service execution, idempotency, and merchant/human review as specified in sections 35 and 36. Conversations remain in the internal platform inbox, with a separate association to the authenticated user's workspace; they are not moved into another merchant's inbox. Merchant self-service WhatsApp connection continues to use Embedded Signup; the platform-number token must never be reused as a merchant credential.
+
+### Account-link storage and delivery
+
+- `whatsapp_account_link_tickets` stores a SHA-256 hash of a cryptographically random 256-bit token, the originating contact/conversation, expiry, and consumption time. The browser receives the secret in the URL fragment, which is omitted from HTTP request URLs and Referer headers; outbound inbox copies redact it. Signup challenges retain only the hash. A new link invalidates prior unconsumed links for the sender.
+- `whatsapp_account_links` maps a contact to a verified user and workspace membership. No account is inferred from a matching phone number. Expired, tampered, consumed, opted-out, or disconnected tickets cannot link. An existing association cannot be reassigned to another user/workspace. Removing membership cascades the association and queued confirmation; lookups also check membership. Link/unlink actions are audited without storing tokens.
+- `whatsapp_link_notifications` is processed by the existing worker. PostgreSQL row locks prevent simultaneous workers sending the same queued job. Provider failure retries up to five attempts with exponential backoff. Opt-out, connection loss, membership loss, or a closed 24-hour window suppresses free-form confirmation. A later HELP still shows the linked workspace. Provider acceptance is stored separately from delivered/read status.
+- As with other external sends, an ambiguous network timeout or crash after provider acceptance but before database commit may duplicate a notification on retry; this is not an exactly-once delivery guarantee. No financial posting occurs in this worker.
+- Migrations create the three tables at API startup. No new environment values are required. Deploy both API and web changes. Existing generic links must be replaced by requesting CONNECT again. To roll back replies, disable the platform connection; preserve link tables for recovery and audit.
+- Regression test: `RUN_DB_TESTS=1 node --import tsx --test apps/api/src/integrations/whatsapp-account-link.integration.test.ts` uses a randomly named temporary PostgreSQL schema, mocks email/Meta, and verifies signup, login, duplicate webhooks, consumed/expired links, cross-account rejection, retries, opt-out, closed windows, membership revocation, and absence of accounting posts.

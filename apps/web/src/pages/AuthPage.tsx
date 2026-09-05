@@ -3,12 +3,18 @@ import { ArrowLeft2, ArrowRight2, Building4, Eye, EyeSlash, Lock1, TickCircle } 
 import { post } from "../lib/api";
 import type { Session } from "../lib/types";
 import { useSession } from "../context/SessionContext";
+import { useNavigate } from "react-router-dom";
 
 type Mode = "login" | "signup" | "verify";
 type Challenge = { challengeId: string; tenantSlug: string; email: string; expiresAt: string; devOtp?: string };
+type AuthResult = Session & { whatsappLink?: { status: "linked" | "unavailable"; message: string } };
 
 export function AuthPage() {
   const { setSession } = useSession();
+  const navigate = useNavigate();
+  const [whatsappLinkToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get("whatsapp_link") ?? undefined);
+  const [linkConsent, setLinkConsent] = useState(false);
+  const [completed, setCompleted] = useState<AuthResult | null>(null);
   const [mode, setMode] = useState<Mode>(() => new URLSearchParams(window.location.search).get("mode") === "signup" ? "signup" : "login");
   const [form, setForm] = useState({ name: "", email: "", password: "", businessName: "", tenantSlug: "", otp: "" });
   const [challenge, setChallenge] = useState<Challenge | null>(null);
@@ -18,24 +24,36 @@ export function AuthPage() {
 
   function update(field: keyof typeof form, value: string) { setForm((current) => ({ ...current, [field]: value })); setError(""); }
 
+  function finish(session: AuthResult) {
+    navigate("/", { replace: true });
+    const { whatsappLink: _link, ...accountSession } = session;
+    setSession(accountSession);
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
     try {
       if (mode === "login") {
-        const session = await post<Session>("/auth/login", { email: form.email, password: form.password, tenantSlug: form.tenantSlug || undefined });
-        setSession(session);
+        const session = await post<AuthResult>("/auth/login", { email: form.email, password: form.password, tenantSlug: form.tenantSlug || undefined, whatsappLinkToken: linkConsent ? whatsappLinkToken : undefined });
+        if (session.whatsappLink) setCompleted(session); else finish(session);
       } else if (mode === "signup") {
-        const next = await post<Challenge>("/auth/signup", { name: form.name, email: form.email, password: form.password, businessName: form.businessName });
+        const next = await post<Challenge>("/auth/signup", { name: form.name, email: form.email, password: form.password, businessName: form.businessName, whatsappLinkToken: linkConsent ? whatsappLinkToken : undefined });
         setChallenge(next); setMode("verify");
       } else if (challenge) {
-        const session = await post<Session & { nextStep: string }>("/auth/signup/verify", { challengeId: challenge.challengeId, otp: form.otp });
-        setSession(session);
+        const session = await post<AuthResult>("/auth/signup/verify", { challengeId: challenge.challengeId, otp: form.otp });
+        if (session.whatsappLink) setCompleted(session); else finish(session);
       }
     } catch (err) { setError(err instanceof Error ? err.message : "Something went wrong"); }
     finally { setBusy(false); }
   }
 
   const signup = mode === "signup";
+  if (completed) return <main className="auth-form-wrap" style={{ minHeight: "100vh" }}><section className="auth-form-card">
+    <div className="auth-icon"><TickCircle size={25} /></div>
+    <h1>{completed.whatsappLink?.status === "linked" ? "Your WhatsApp is connected" : "Your account is ready"}</h1>
+    <p role="status">{completed.whatsappLink?.message}</p>
+    <button className="primary-button" onClick={() => finish(completed)}>Continue to workspace <ArrowRight2 size={18} /></button>
+  </section></main>;
   return (
     <main className="auth-page">
       <section className="auth-story">
@@ -78,6 +96,7 @@ export function AuthPage() {
               <p className="muted">{signup ? "No administrator needed. Your workspace is created as soon as you verify your email." : "Continue to your business workspace."}</p>
               <div className="auth-switch"><button className={!signup ? "active" : ""} onClick={() => setMode("login")}>Sign in</button><button className={signup ? "active" : ""} onClick={() => setMode("signup")}>Create account</button></div>
               <form onSubmit={submit} className="form-stack">
+                {whatsappLinkToken && <label><span><input type="checkbox" style={{ width: "auto", minHeight: "auto", marginRight: 8 }} checked={linkConsent} onChange={e => setLinkConsent(e.target.checked)} required /> Connect the WhatsApp number that received this private link to my workspace.</span><small>Only continue if you requested this link in your own WhatsApp chat. We’ll confirm the connection there after you finish.</small></label>}
                 {signup && <label>Your name<input value={form.name} onChange={(e) => update("name", e.target.value)} placeholder="Ada Okafor" autoComplete="name" required /></label>}
                 {signup && <label>Business name<input value={form.businessName} onChange={(e) => update("businessName", e.target.value)} placeholder="Ada's Market" required /><small>This becomes your unique workspace ID.</small></label>}
                 <label>Email address<input type="email" value={form.email} onChange={(e) => update("email", e.target.value)} placeholder="you@business.com" autoComplete="email" required /></label>

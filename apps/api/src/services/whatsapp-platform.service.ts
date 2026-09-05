@@ -15,7 +15,7 @@ export function platformReplyFor(input: PlatformReplyInput): string | null {
   const body = input.body.trim();
   if (/^(stop|unsubscribe|opt\s*out)$/i.test(body)) return null;
   if (isAccountCommand(body)) {
-    if (input.workspaceName) return `This WhatsApp number is connected to ${input.workspaceName}. Reply HELP to continue, or UNLINK to disconnect before connecting another account.`;
+    if (input.workspaceName && !input.registrationUrl) return `This WhatsApp number is connected to ${input.workspaceName}. Reply LOGIN to open your workspace, or UNLINK to disconnect.`;
     return `Create a workspace or sign in to an existing account to connect this WhatsApp number:\n${input.registrationUrl ?? `${input.publicWebUrl}/login?mode=signup`}\n\nYour private link expires in 30 minutes. Do not forward it. We will confirm here after you finish. Never send passwords, card PINs, or OTPs in this chat.`;
   }
   if (/\b(paid|payment|transfer|transferred|receipt)\b/i.test(body)) {
@@ -38,7 +38,7 @@ export async function linkedPlatformReply(input: PlatformReplyInput & { contactI
     return "Your WhatsApp number has been disconnected from your LemonBooks account. Your business records are unchanged. Reply CONNECT to link an account again.";
   }
   const workspace = await getWhatsAppLinkedWorkspace(input.contactId);
-  const registrationUrl = !workspace && isAccountCommand(input.body)
+  const registrationUrl = isAccountCommand(input.body)
     ? await createWhatsAppLink(input.contactId, input.conversationId) : undefined;
   const reply = platformReplyFor({ ...input, registrationUrl, workspaceName: workspace?.name });
   if (workspace && reply && !isAccountCommand(input.body) && /\b(invoice|order|sale|expense|stock|inventory|restock|record|paid|payment|transfer|transferred|receipt)\b/i.test(input.body)) {

@@ -116,7 +116,7 @@ export async function login(emailInput: string, password: string, tenantInput?: 
      WHERE lower(u.email)=$1 AND ($2::text IS NULL OR b.tenant_slug=$2) ORDER BY m.created_at LIMIT 2`,
     [email, tenant || null],
   );
-  if (!rows[0] || !(await bcrypt.compare(password, rows[0].password_hash))) throw new HttpError(401, "Email or password is incorrect");
+  if (!rows[0]?.password_hash || typeof password !== "string" || !(await bcrypt.compare(password, rows[0].password_hash))) throw new HttpError(401, "Email or password is incorrect");
   if (!tenant && rows.length > 1) throw new HttpError(409, "Choose a business workspace to continue", "TENANT_REQUIRED");
   const row = rows[0];
   const whatsappLink = whatsappLinkToken ? await transaction(client => completeWhatsAppLink(client, hashWhatsAppLink(whatsappLinkToken), row.user_id, row.id)) : undefined;

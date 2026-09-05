@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { requestWhatsAppCode, verifyWhatsAppCode, finishWhatsAppAuth } from "../services/whatsapp-auth.service";
 import { asyncRoute } from "../http";
 import * as auth from "../services/auth.service";
 import { authenticate } from "../middleware/auth";
@@ -6,6 +7,9 @@ import { transaction } from "../database/pool";
 import { completeWhatsAppLink, hashWhatsAppLink } from "../services/whatsapp-account-link.service";
 
 export const authRouter = Router();
+authRouter.post("/whatsapp/code", asyncRoute(async (req,res) => { res.json({success:true,data:await requestWhatsAppCode(req.body.whatsappLinkToken)}); }));
+authRouter.post("/whatsapp/verify", asyncRoute(async (req,res) => { res.json({success:true,data:await verifyWhatsAppCode(req.body.whatsappLinkToken,req.body.otp)}); }));
+authRouter.post("/whatsapp/finish", asyncRoute(async (req,res) => { res.json({success:true,data:await finishWhatsAppAuth(req.body)}); }));
 
 authRouter.post("/signup", asyncRoute(async (req, res) => {
   const result = await auth.startSignup(req.body);

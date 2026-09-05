@@ -132,6 +132,56 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
     assert.equal((await query("SELECT * FROM whatsapp_account_links")).length, 0, "opted-out contacts can still unlink without receiving a reply");
     assert.equal((await query("SELECT id FROM invoices")).length, 0, "linking never posts invoices");
     assert.ok(connection.id);
+    // WhatsApp-only signup: no email/password, and no account before OTP + details.
+    const wa = await import("../services/whatsapp-auth.service");
+    await query("UPDATE whatsapp_contacts SET consent_state='opted_in',service_window_expires_at=now()+interval '24 hours'");
+    async function newToken() {
+      const url = await links.createWhatsAppLink(binding.contact_id, conversation.id);
+      return new URLSearchParams(new URL(url).hash.slice(1)).get("whatsapp_link")!;
+    }
+    const waToken = await newToken();
+    const beforeUsers = (await query("SELECT id FROM users")).length;
+    await assert.rejects(wa.finishWhatsAppAuth({whatsappLinkToken:waToken,proof:"bad"}));
+    failMeta = true;
+    await assert.rejects(wa.requestWhatsAppCode(waToken));
+    assert.equal((await query("SELECT * FROM whatsapp_auth_challenges")).length,0);
+    failMeta = false;
+    await wa.requestWhatsAppCode(waToken);
+    const waOtp = sent.at(-1)!.match(/code is (\d{6})/)![1];
+    await assert.rejects(wa.requestWhatsAppCode(waToken), /Wait a minute/);
+    await assert.rejects(wa.verifyWhatsAppCode(waToken,"bad"));
+    assert.equal((await query<{attempts:number}>("SELECT attempts FROM whatsapp_auth_challenges"))[0]!.attempts,1);
+    const verified = await wa.verifyWhatsAppCode(waToken,waOtp);
+    assert.equal(verified.existing,false);
+    assert.equal((await query("SELECT id FROM users")).length,beforeUsers);
+    await assert.rejects(wa.verifyWhatsAppCode(waToken,waOtp));
+    const signup = {whatsappLinkToken:waToken,proof:verified.proof,name:"Phone Owner",businessName:"Phone Shop",countryCode:"NG",currency:"NGN",timezone:"Africa/Lagos"};
+    const finished = await wa.finishWhatsAppAuth(signup);
+    assert.equal(finished.user.email,null);
+    assert.equal(finished.business.onboardingCompleted,true);
+    assert.equal((await query("SELECT id FROM users")).length,beforeUsers+1);
+    await assert.rejects(wa.finishWhatsAppAuth(signup));
+    await query("UPDATE whatsapp_auth_challenges SET sent_at=now()-interval '2 minutes'");
+    await inbound("LOGIN");
+    const returnToken = new URLSearchParams(new URL(sent.at(-1)!.match(/https:\/\/\S+/)![0]).hash.slice(1)).get("whatsapp_link")!;
+    await wa.requestWhatsAppCode(returnToken);
+    const loginOtp = sent.at(-1)!.match(/code is (\d{6})/)![1];
+    const returning = await wa.verifyWhatsAppCode(returnToken,loginOtp);
+    assert.equal(returning.existing,true);
+    await assert.rejects(wa.finishWhatsAppAuth({whatsappLinkToken:returnToken,proof:returning.proof,businessId:business.id}));
+    const resumed = await wa.finishWhatsAppAuth({whatsappLinkToken:returnToken,proof:returning.proof,businessId:finished.business.id});
+    assert.equal(resumed.user.id,finished.user.id);
+    assert.equal((await query("SELECT id FROM users")).length,beforeUsers+1);
+    const expiredOtpToken = await newToken();
+    await query("UPDATE whatsapp_auth_challenges SET sent_at=now()-interval '2 minutes'");
+    await wa.requestWhatsAppCode(expiredOtpToken);
+    const expiredOtp = sent.at(-1)!.match(/code is (\d{6})/)![1];
+    await query("UPDATE whatsapp_auth_challenges SET expires_at=now()-interval '1 second'");
+    await assert.rejects(wa.verifyWhatsAppCode(expiredOtpToken,expiredOtp));
+    await query("UPDATE whatsapp_auth_challenges SET sent_at=now()-interval '2 minutes'");
+    await wa.requestWhatsAppCode(expiredOtpToken);
+    for (let i=0;i<5;i++) await assert.rejects(wa.verifyWhatsAppCode(expiredOtpToken,"bad"));
+    await assert.rejects(wa.verifyWhatsAppCode(expiredOtpToken,sent.at(-1)!.match(/code is (\d{6})/)![1]),/Too many attempts/);
   } finally {
     globalThis.fetch = originalFetch;
     nodemailer.createTransport = originalTransport;

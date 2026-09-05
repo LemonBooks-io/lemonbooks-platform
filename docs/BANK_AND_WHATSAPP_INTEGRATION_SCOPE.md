@@ -1,5 +1,39 @@
 # Bank Reconciliation and WhatsApp Business Integration
 
+## WhatsApp-first authentication update — September 5, 2026
+
+WhatsApp REGISTER/LOGIN/CONNECT issues a private, expiring browser link. Signed-out
+visitors request an OTP delivered to the initiating WhatsApp contact, verify it in
+the browser, then (for new users) enter their name, business name, country, currency,
+timezone and optional address. Finish creates the user, workspace, owner membership
+and conversation binding atomically, marks onboarding complete and opens the workspace.
+Neither email nor password is required. Existing verified phone identities or existing
+explicit account links resolve returning users; memberships govern workspace selection.
+Unverified business-profile phone fields are never used to infer account ownership.
+Existing email-only users must explicitly link their authenticated account first.
+
+Endpoints: POST /api/v3/auth/whatsapp/code, /whatsapp/verify and /whatsapp/finish
+(all three under /api/v3/auth). Verification returns a short-lived, random proof;
+business details cannot be submitted with just the private link or an unverified code.
+OTP hashes and proof hashes are stored, not plaintext secrets. Codes expire in ten
+minutes, allow five attempts, and are single-use. Resends invalidate previous codes
+and proofs; sends are limited to one per minute and ten per hour per sender.
+Consent, active platform connection, unconsumed link and open service window are
+checked throughout. Codes are not returned to the browser or written to the inbox/logs.
+Delivery failure does not create an account. These are chat-initiated service-window
+messages; outside that window the user must send a fresh LOGIN/REGISTER message.
+
+Optional business contact email can be added in Settings. It does not become a
+verified email-login identity. Paystack account activation requires a contact email
+and prompts for it separately. UNLINK removes conversation authorization, not the
+verified phone login identity or business records.
+
+Deployment requires both API and web updates. Startup migrations add identity and
+OTP tables and permit null user/business emails; existing email accounts remain
+unchanged. No new environment variables are required. Real PostgreSQL integration
+tests mock Meta delivery; actual production delivery and browser UX need deployment
+smoke testing. No accounting or inventory records are posted by signup.
+
 Status: production implementation specification  
 Owner: LemonBooks product and engineering  
 Last reviewed: 2026-09-05

@@ -23,13 +23,14 @@ businessRouter.get("/me", asyncRoute(async (req, res) => {
 }));
 
 businessRouter.patch("/me", asyncRoute(async (req, res) => {
-  const { name, phone, address, countryCode, currency, timezone, logoUrl } = req.body;
+  const { name, phone, address, countryCode, currency, timezone, logoUrl, email } = req.body;
+  if (email !== undefined && (typeof email !== "string" || (email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim())))) throw new HttpError(400, "Enter a valid contact email");
   if (!name?.trim()) throw new HttpError(400, "Business name is required");
   if (currency && !/^[A-Z]{3}$/.test(currency)) throw new HttpError(400, "Currency must be a three-letter code");
   const rows = await query<Record<string, unknown>>(
     `UPDATE businesses SET name=$2,phone=$3,address=$4,country_code=$5,currency=$6,timezone=COALESCE($7,timezone),
-     logo_url=$8,onboarding_completed=true,updated_at=now() WHERE id=$1 RETURNING *`,
-    [req.auth!.businessId, name.trim(), phone || null, address || null, countryCode || null, currency || null, timezone || null, logoUrl || null],
+     logo_url=$8,email=CASE WHEN $9::boolean THEN $10::text ELSE email END,onboarding_completed=true,updated_at=now() WHERE id=$1 RETURNING *`,
+    [req.auth!.businessId, name.trim(), phone || null, address || null, countryCode || null, currency || null, timezone || null, logoUrl || null, email !== undefined, email?.trim().toLowerCase() || null],
   );
   res.json({ success: true, message: "Business settings saved", data: publicBusiness(rows[0]!) });
 }));
@@ -149,6 +150,7 @@ businessRouter.post("/payment-account/provision", asyncRoute(async (req, res) =>
   if (testMode && (bankCode !== "057" || accountNumber !== "0000000000")) throw new HttpError(400, "In test mode use Zenith Bank (057) and account number 0000000000");
   const businesses = await query<Record<string, any>>("SELECT * FROM businesses WHERE id=$1", [req.auth!.businessId]); const business = businesses[0];
   if (!business || !business.phone || !business.country_code) throw new HttpError(409, "Complete your business phone and country before setting up payments");
+  if (!business.email) throw new HttpError(409, "Add a business contact email in Settings before activating Paystack.");
   if (!['NG','GH'].includes(business.country_code)) throw new HttpError(409, "Paystack dedicated accounts currently support Nigerian and Ghanaian businesses");
   const existing = await query<Record<string, any>>("SELECT * FROM business_payment_accounts WHERE business_id=$1", [business.id]);
   if (existing[0]?.status === "active") throw new HttpError(409, "Payment account is already active");

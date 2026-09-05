@@ -1,9 +1,9 @@
 export type Business = {
-  id: string; name: string; tenantSlug: string; email: string; phone?: string; address?: string;
+  id: string; name: string; tenantSlug: string; email: string | null; phone?: string; address?: string;
   countryCode?: string; currency?: string; timezone: string; logoUrl?: string;
   onboardingCompleted: boolean; paymentProvider?: string;
 };
-export type User = { id: string; email: string; name: string; role: string };
+export type User = { id: string; email: string | null; name: string; role: string };
 export type Session = { token: string; user: User; business: Business };
 export type Summary = { clients: number; items: number; invoices: number; outstanding: number; receivedThisMonth: number };
 export type Client = { id: string; name: string; email?: string; phone?: string; company?: string; address?: string; balance: string; created_at: string };

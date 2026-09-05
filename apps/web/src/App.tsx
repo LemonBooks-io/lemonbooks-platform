@@ -22,6 +22,7 @@ import { PrivacyPolicyPage } from "./pages/PrivacyPolicyPage";
 import { PublicSitePage } from "./pages/PublicSitePage";
 import { TermsPage } from "./pages/TermsPage";
 import { WhatsAppAccountLinkPage } from "./pages/WhatsAppAccountLinkPage";
+import { WhatsAppAuthPage } from "./pages/WhatsAppAuthPage";
 
 function ProductRoutes() {
   const { session } = useSession();
@@ -36,6 +37,7 @@ function ProductRoutes() {
   }
   if (location.pathname.startsWith("/customer-portal")) return <Routes><Route path="/customer-portal/*" element={<CustomerPortalPage/>}/></Routes>;
   if (!session && location.pathname === "/") return <PublicSitePage/>;
+  if (!session && location.pathname === "/login" && new URLSearchParams(location.hash.slice(1)).has("whatsapp_link")) return <WhatsAppAuthPage />;
   if (!session) return <AuthPage />;
   if (location.pathname === "/login" && new URLSearchParams(location.hash.slice(1)).has("whatsapp_link")) return <WhatsAppAccountLinkPage />;
   if (!session.business.onboardingCompleted) return <OnboardingPage />;

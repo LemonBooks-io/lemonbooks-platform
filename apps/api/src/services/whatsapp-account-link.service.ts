@@ -48,7 +48,8 @@ export async function completeWhatsAppLink(client: PoolClient, hash: string | nu
   if (!ticket) return unavailable;
   const { rows: [member] } = await client.query(`SELECT b.name FROM memberships m
     JOIN businesses b ON b.id=m.business_id JOIN users u ON u.id=m.user_id
-    WHERE m.user_id=$1 AND m.business_id=$2 AND u.email_verified_at IS NOT NULL`, [userId, businessId]);
+    WHERE m.user_id=$1 AND m.business_id=$2 AND (u.email_verified_at IS NOT NULL
+      OR EXISTS(SELECT 1 FROM whatsapp_auth_identities a WHERE a.user_id=u.id))`, [userId, businessId]);
   if (!member) return unavailable;
   const { rows: [existing] } = await client.query("SELECT business_id,user_id FROM whatsapp_account_links WHERE contact_id=$1", [ticket.contact_id]);
   if (existing && (existing.business_id !== businessId || existing.user_id !== userId)) {

@@ -4,6 +4,7 @@ export function DataDeletionPage() {
   return <main className="policy-page">
     <header className="policy-header">
       <a className="brand" href="/"><span className="brand-mark">L</span><span>LemonBooks</span></a>
+      <nav><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/data-deletion" aria-current="page">Data deletion</a></nav>
       <a href="mailto:privacy@lemonbooks.io">privacy@lemonbooks.io</a>
     </header>
     <section className="policy-hero">
@@ -11,7 +12,7 @@ export function DataDeletionPage() {
       <p className="eyebrow">PRIVACY &amp; ACCOUNT CONTROL</p>
       <h1>Data deletion instructions</h1>
       <p>You can disconnect WhatsApp or ask LemonBooks to delete personal and business-account data associated with your account.</p>
-      <small>Last updated: August 21, 2026</small>
+      <small>Last updated: September 5, 2026</small>
     </section>
     <div className="policy-layout">
       <aside>
@@ -38,6 +39,6 @@ export function DataDeletionPage() {
         <section className="policy-contact"><Message size={24}/><div><h2>Questions or deletion requests</h2><p>Email <a href="mailto:privacy@lemonbooks.io">privacy@lemonbooks.io</a>. If that address is unavailable, contact <a href="mailto:support@lemonbooks.io">support@lemonbooks.io</a>.</p></div></section>
       </article>
     </div>
-    <footer className="policy-footer"><span>© 2026 LemonBooks</span><a href="/"><ArrowLeft2 size={15}/>Return to LemonBooks</a><span><TickCircle size={15}/>Public deletion instructions</span></footer>
+    <footer className="policy-footer"><span>© 2026 LemonBooks</span><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a><a href="/"><ArrowLeft2 size={15}/>Return to LemonBooks</a><span><TickCircle size={15}/>Public deletion instructions</span></footer>
   </main>;
 }

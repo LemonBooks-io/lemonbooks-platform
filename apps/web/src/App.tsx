@@ -18,10 +18,15 @@ import { BankingPage } from "./pages/BankingPage";
 import { WhatsAppEntryPage } from "./pages/WhatsAppEntryPage";
 import { ReconciliationOperationsPage } from "./pages/ReconciliationOperationsPage";
 import { DataDeletionPage } from "./pages/DataDeletionPage";
+import { PrivacyPolicyPage } from "./pages/PrivacyPolicyPage";
+import { PublicSitePage } from "./pages/PublicSitePage";
+import { TermsPage } from "./pages/TermsPage";
 
 function ProductRoutes() {
   const { session } = useSession();
   const location = useLocation();
+  if (location.pathname === "/privacy" || location.pathname === "/privacy/") return <PrivacyPolicyPage/>;
+  if (location.pathname === "/terms" || location.pathname === "/terms/") return <TermsPage/>;
   if (location.pathname === "/data-deletion" || location.pathname === "/data-deletion/") return <DataDeletionPage/>;
   if (location.pathname.startsWith("/pay/invoice/")) return <Routes><Route path="/pay/invoice/:token" element={<PublicInvoicePage/>}/><Route path="*" element={<Navigate to="/customer-portal" replace/>}/></Routes>;
   if (location.pathname.startsWith("/client-portal")) {
@@ -29,6 +34,7 @@ function ProductRoutes() {
     return <Navigate to={`/customer-portal${suffix}${location.search}${location.hash}`} replace />;
   }
   if (location.pathname.startsWith("/customer-portal")) return <Routes><Route path="/customer-portal/*" element={<CustomerPortalPage/>}/></Routes>;
+  if (!session && location.pathname === "/") return <PublicSitePage/>;
   if (!session) return <AuthPage />;
   if (!session.business.onboardingCompleted) return <OnboardingPage />;
   return <Routes>

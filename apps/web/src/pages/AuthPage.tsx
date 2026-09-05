@@ -9,7 +9,7 @@ type Challenge = { challengeId: string; tenantSlug: string; email: string; expir
 
 export function AuthPage() {
   const { setSession } = useSession();
-  const [mode, setMode] = useState<Mode>("login");
+  const [mode, setMode] = useState<Mode>(() => new URLSearchParams(window.location.search).get("mode") === "signup" ? "signup" : "login");
   const [form, setForm] = useState({ name: "", email: "", password: "", businessName: "", tenantSlug: "", otp: "" });
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -86,7 +86,7 @@ export function AuthPage() {
                 {error && <p className="form-error">{error}</p>}
                 <button className="primary-button" disabled={busy}>{busy ? "Please wait…" : <>{signup ? "Continue to verification" : "Sign in"}<ArrowRight2 size={18} /></>}</button>
               </form>
-              {signup && <p className="legal">By continuing, you agree to the LemonBooks Terms and Privacy Policy.</p>}
+              {signup && <p className="legal">By continuing, you agree to the LemonBooks <a href="/terms" target="_blank" rel="noreferrer">Terms of Service</a> and acknowledge the <a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.</p>}
             </>
           )}
         </div>

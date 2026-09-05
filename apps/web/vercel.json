@@ -21,6 +21,9 @@
     }
   ],
   "rewrites": [
+    { "source": "/privacy", "destination": "/" },
+    { "source": "/terms", "destination": "/" },
+    { "source": "/data-deletion", "destination": "/" },
     { "source": "/(.*)", "destination": "/" }
   ]
 }

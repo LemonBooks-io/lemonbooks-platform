@@ -5,9 +5,11 @@ import { migrate } from "./database/migrate";
 import { pool } from "./database/pool";
 import { createApp } from "./app";
 import { startIntegrationWorker } from "./services/integration.service";
+import { provisionWhatsAppPlatformConnection } from "./services/whatsapp-platform.service";
 
 async function start() {
   await migrate();
+  await provisionWhatsAppPlatformConnection();
   startIntegrationWorker();
   const server = createApp().listen(env.port, () => {
     console.log(`LemonBooks API listening at http://localhost:${env.port}`);

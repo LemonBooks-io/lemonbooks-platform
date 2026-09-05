@@ -2,7 +2,7 @@
 
 Status: production implementation specification  
 Owner: LemonBooks product and engineering  
-Last reviewed: 2026-08-22
+Last reviewed: 2026-09-05
 Initial market: Nigeria  
 Initial banking candidate: Moniepoint  
 Messaging platform: Meta WhatsApp Business Platform / Cloud API
@@ -27,13 +27,14 @@ Implemented and locally testable:
 - Operator retry/dead-letter views for integration jobs and transactional outbox messages, with explicit idempotent replay actions.
 - Scheduled overdue-state detection and idempotent `invoice.overdue` events for downstream WhatsApp reminder automation.
 - Opt-in PostgreSQL tests covering concurrent duplicate delivery, concurrent posting, tenant isolation, inventory posting, and dead-letter exhaustion (`RUN_DB_TESTS=1`).
+- A separately designated LemonBooks-owned WhatsApp entry point can be provisioned at startup against an existing platform tenant. Valid signed inbound messages are stored and receive deterministic welcome, registration, payment-claim, and draft-record guidance. Customer-owned WhatsApp connections remain inbox-only and are never opted into platform auto-replies implicitly.
 
 Still dependent on external approval or follow-up hardening:
 
 - Live Moniepoint account-feed adapter, credentials, account linking, complete event/status mapping, and certification.
 - Meta App Review, Advanced Access, Tech Provider approval, production configuration validation, coexistence onboarding/confirmation, number-registration recovery, Meta business-verification status, token renewal, and complete Meta-side revocation.
 - Manual production inbox sends call Cloud API, but outbox-driven automations still create simulated provider IDs and must not be treated as live delivery until replaced by the production sender worker.
-- AI-assisted product/order interpretation, draft order and invoice creation, inventory reservation, and WhatsApp-to-reconciliation candidate creation are not implemented.
+- AI-assisted product/order interpretation, actual domain draft creation, inventory reservation, and WhatsApp-to-reconciliation candidate creation are not implemented. The platform entry point currently captures the message and explains its evidence/draft status without claiming that a record was posted.
 - Broader performance/load testing still requires an isolated production-shaped database and traffic profile; deterministic database concurrency fixtures are active locally.
 - Production secrets must move from environment variables to a managed secret store/KMS envelope-encryption implementation.
 - Transfer reconciliation targets and provider-certified live traffic remain later implementation batches.
@@ -1336,3 +1337,70 @@ Fail closed when production configuration is missing. Never silently fall back t
 10. **Production approval:** Meta configuration, Tech Provider/App Review evidence, country eligibility, privacy/compliance, load/security testing, runbooks and staged rollout.
 
 Each work package requires API/schema migrations, UI states, audit events, metrics, tests, operational documentation, feature flags, rollback strategy, and an owner. A work package is complete only when its production definition and failure paths are demonstrated end to end.
+
+## 41. LemonBooks-owned WhatsApp entry point runbook
+
+This connection is distinct from merchant Embedded Signup. It lets a prospective or existing user message the LemonBooks-owned number to receive onboarding guidance and safely submit a business request. It must be bound to one explicit internal platform tenant so all persisted records remain tenant-scoped.
+
+### Meta-side sequence
+
+1. In WhatsApp Manager, open the registered production number and complete its **Profile**: approved display name, square business logo/profile image, business description, category, website, support email, and address only where accurate. The Meta developer-app icon does not control the WhatsApp chat avatar.
+2. Complete the business portfolio's verification and billing requirements. Use “business purposes” when LemonBooks is purchasing WhatsApp Business services for its commercial operation.
+3. In Business Settings, create a dedicated system user, assign only the LemonBooks app and WABA assets it needs, and generate a non-expiring/permanent system-user token with `whatsapp_business_management` and `whatsapp_business_messaging`. Never use the temporary “Employee” testing token in production.
+4. Configure `https://api.lemonbooks.io/api/v3/webhooks/whatsapp` as the callback, use the exact server `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, keep client-certificate attachment off unless deliberately deployed, and subscribe the WABA/app to `messages`.
+5. Publish the approved Meta app. Confirm `/{WABA_ID}/subscribed_apps` returns the LemonBooks app and that a real inbound message produces HTTP 200 at the callback.
+
+### Required production environment
+
+```dotenv
+WHATSAPP_META_APP_ID=848510244918866
+WHATSAPP_META_APP_SECRET=<Meta app secret>
+WHATSAPP_WEBHOOK_VERIFY_TOKEN=<strong private random value shared only with Meta>
+WHATSAPP_PLATFORM_TENANT_SLUG=<existing internal LemonBooks tenant slug>
+WHATSAPP_PLATFORM_WABA_ID=1059428370199321
+WHATSAPP_PLATFORM_PHONE_NUMBER_ID=1356821100840583
+WHATSAPP_PLATFORM_ACCESS_TOKEN=<permanent system-user token>
+INTEGRATION_CREDENTIALS_KEY=<existing 32-byte integration encryption key>
+PUBLIC_WEB_URL=https://lemonbooks.io
+```
+
+All four `WHATSAPP_PLATFORM_*` values are atomic: configure all or none. Startup fails closed for a partial configuration, a missing encryption key, an unknown platform tenant, or a phone number already owned by another tenant. The token is encrypted before database persistence and is never returned by an API.
+
+After changing production environment values:
+
+```bash
+npm run build --workspace=apps/api
+sudo systemctl restart lemonbooks-api
+sudo systemctl status lemonbooks-api --no-pager
+```
+
+Expected startup output includes `WhatsApp platform connection ready for phone 1356821100840583`. Monitor delivery with:
+
+```bash
+sudo journalctl -u lemonbooks-api -f
+sudo tail -f /var/log/nginx/access.log | grep --line-buffered '/api/v3/webhooks/whatsapp'
+```
+
+### Initial conversation behavior
+
+- `REGISTER`, `SIGN UP`, `CREATE ACCOUNT`, or `GET STARTED` returns the HTTPS LemonBooks signup link; account verification continues in the existing one-time-code web flow. Passwords and OTPs must never be collected in WhatsApp.
+- `INVOICE`, `ORDER`, `SALE`, `EXPENSE`, `STOCK`, `INVENTORY`, `RESTOCK`, or `RECORD` stores the inbound request and identifies it explicitly as a draft awaiting review.
+- `PAID`, `PAYMENT`, `TRANSFER`, `TRANSFERRED`, or `RECEIPT` stores evidence and states explicitly that payment remains unconfirmed until matched to authoritative provider/bank evidence.
+- `STOP`, `UNSUBSCRIBE`, or `OPT OUT` records opt-out and suppresses the reply.
+- Other text receives the welcome/help menu.
+
+Only a connection carrying `capabilities.platformEntryPoint=true` may use these automatic replies. A send failure is logged without deactivating inbound ingestion. Duplicate provider message IDs do not produce duplicate replies.
+
+### Acceptance test order
+
+1. Restart and confirm the platform-connection startup line.
+2. Send `HELP` from an authorized real WhatsApp account and confirm one inbound webhook HTTP 200, one stored inbound message, and one accepted reply.
+3. Send `REGISTER` and confirm the link opens the production OTP signup flow.
+4. Send a payment claim and verify the response never says paid, settled, reconciled, or confirmed.
+5. Send `STOP`, then another message, and verify automation remains suppressed.
+6. Confirm the conversation appears in the tenant's LemonBooks WhatsApp inbox with inbound/outbound provider states.
+7. Expire/revoke the test token in staging and prove the error is visible while subsequent inbound webhooks continue to be accepted.
+
+### Deliberately deferred lifecycle
+
+Conversational messages do not yet create authenticated accounting records. Production record creation requires identity/account linking, explicit confirmation, validated structured commands, domain-service execution, idempotency, audit, and merchant/human review as specified in sections 35 and 36. Merchant self-service WhatsApp connection continues to use Embedded Signup; the platform-number token must never be reused as a merchant credential.

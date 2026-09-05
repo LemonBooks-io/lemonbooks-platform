@@ -26,6 +26,10 @@ export const env = {
     graphVersion: process.env.META_GRAPH_API_VERSION?.trim() ?? "v23.0",
     verifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim() ?? "",
     credentialsKey: process.env.INTEGRATION_CREDENTIALS_KEY?.trim() ?? "",
+    platformTenantSlug: process.env.WHATSAPP_PLATFORM_TENANT_SLUG?.trim() ?? "",
+    platformWabaId: process.env.WHATSAPP_PLATFORM_WABA_ID?.trim() ?? "",
+    platformPhoneNumberId: process.env.WHATSAPP_PLATFORM_PHONE_NUMBER_ID?.trim() ?? "",
+    platformAccessToken: process.env.WHATSAPP_PLATFORM_ACCESS_TOKEN?.trim() ?? "",
   },
   smtp: {
     host: process.env.SMTP_HOST?.trim() ?? "",

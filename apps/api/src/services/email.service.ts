@@ -29,16 +29,18 @@ export async function sendCustomerAccessCode(input: {
   name: string;
   businessName: string;
   otp: string;
-  purpose: "activate" | "login";
+  purpose: "activate" | "login" | "business_signup";
 }) {
   if (!emailConfigured())
     throw new HttpError(
       503,
-      "Email delivery is not configured. Add SMTP settings before using customer sign-in.",
+      "Email delivery is not configured. Add SMTP settings before requesting verification codes.",
       "EMAIL_NOT_CONFIGURED",
     );
   const action =
-    input.purpose === "activate"
+    input.purpose === "business_signup"
+      ? "create your business workspace"
+      : input.purpose === "activate"
       ? "create your customer account"
       : "sign in to your customer account";
   await createTransporter().sendMail({

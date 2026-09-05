@@ -4,6 +4,7 @@ import { env } from "../config";
 import { query, transaction } from "../database/pool";
 import { HttpError } from "../http";
 import { createSessionToken } from "../middleware/auth";
+import { emailConfigured, sendCustomerAccessCode } from "./email.service";
 
 type SignupInput = { name: string; email: string; password: string; businessName: string };
 type Challenge = { id: string; tenant_slug: string; expires_at: Date };
@@ -37,6 +38,7 @@ export async function startSignup(input: SignupInput) {
   if (!name || !email || !businessName || !input.password) throw new HttpError(400, "Complete all required fields");
   if (!/^\S+@\S+\.\S+$/.test(email)) throw new HttpError(400, "Enter a valid email address");
   if (input.password.length < 8) throw new HttpError(400, "Password must have at least 8 characters");
+  if (!emailConfigured()) throw new HttpError(503, "Email delivery is not configured. Add SMTP settings before signing up.", "EMAIL_NOT_CONFIGURED");
 
   const existingUser = await query<{ id: string }>("SELECT id FROM users WHERE lower(email) = $1", [email]);
   if (existingUser[0]) throw new HttpError(409, "An account already exists for this email");
@@ -58,8 +60,14 @@ export async function startSignup(input: SignupInput) {
   );
   const challenge = rows[0]!;
 
-  // Email delivery will replace this development-only return when a provider is configured.
-  return { challengeId: challenge.id, tenantSlug: challenge.tenant_slug, email, expiresAt: challenge.expires_at, ...(env.nodeEnv !== "production" ? { devOtp: otp } : {}) };
+  try {
+    await sendCustomerAccessCode({ email, name, businessName, otp, purpose: "business_signup" });
+  } catch {
+    await query("DELETE FROM signup_challenges WHERE id=$1", [challenge.id]);
+    console.error("Business signup verification email failed; check SMTP configuration and provider delivery logs");
+    throw new HttpError(502, "We could not send your verification email. Please try again shortly.", "EMAIL_DELIVERY_FAILED");
+  }
+  return { challengeId: challenge.id, tenantSlug: challenge.tenant_slug, email, expiresAt: challenge.expires_at };
 }
 
 export async function verifySignup(challengeId: string, otp: string) {

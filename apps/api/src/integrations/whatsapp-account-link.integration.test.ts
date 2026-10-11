@@ -21,7 +21,7 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
     const auth = await import("../services/auth.service");
     const { encryptMetaCredentials } = await import("../services/meta-whatsapp.service");
     const { metaWebhookReceiver } = await import("../routes/meta-whatsapp-webhook");
-    Object.assign(env.whatsapp, { appSecret: "test-signing-secret", credentialsKey: crypto.randomBytes(32).toString("base64") });
+    Object.assign(env.whatsapp, { appSecret: "test-signing-secret", credentialsKey: crypto.randomBytes(32).toString("base64"), platformDisplayNumber: "15551234567" });
     Object.assign(env.smtp, { host: "smtp.example.test", user: "test", pass: "test" });
     env.publicWebUrl = "https://www.lemonbooks.io";
     let otp = "";
@@ -200,14 +200,19 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
     assert.ok(directBusiness.id);
     assert.equal((await query("SELECT user_id FROM whatsapp_auth_identities WHERE phone='+15555550200'")).length,1);
 
-    await inbound("ADD ITEM | Golden Rice | 10 | 45000 | 40000", "direct-stock", directPhone);
-    assert.match(sent.at(-1)!, /Inventory draft/);
-    assert.equal((await query("SELECT id FROM items WHERE business_id=$1",[directBusiness.id])).length,0,"drafts do not mutate inventory");
-    await inbound("CONFIRM", "direct-stock-confirm", directPhone);
-    assert.match(sent.at(-1)!, /Current stock: 10/);
-    assert.equal((await query("SELECT id FROM items WHERE business_id=$1",[directBusiness.id])).length,1);
+    await inbound("AI\nDescription: Premium long grain\nPrice: 45000\nN: Golden Rice\nCost: 40000\nQ: 10", "direct-stock", directPhone);
+    assert.match(sent.at(-1)!, /saved to Direct Market/);
+    const directItems=await query<{description:string;stock_quantity:string}>("SELECT description,stock_quantity FROM items WHERE business_id=$1",[directBusiness.id]);
+    assert.equal(directItems.length,1,"items save immediately without a draft");
+    assert.equal(directItems[0]!.description,"Premium long grain");
+    assert.equal(Number(directItems[0]!.stock_quantity),10);
+    assert.equal((await query("SELECT id FROM whatsapp_action_drafts WHERE business_id=$1 AND action_type='inventory'",[directBusiness.id])).length,0);
 
-    await inbound("INVOICE | Kemi | Golden Rice | 2 | 45000", "direct-invoice", directPhone);
+    await inbound("AC\nPhone: 08012345678\nName: Kemi Stores\nAddress: Yaba, Lagos", "direct-customer", directPhone);
+    assert.match(sent.at(-1)!, /Kemi Stores is saved to Direct Market/);
+    assert.equal((await query("SELECT id FROM clients WHERE business_id=$1 AND name='Kemi Stores'",[directBusiness.id])).length,1,"customers save immediately without a draft");
+
+    await inbound("INVOICE\nQuantity: 2\nCustomer: Kemi\nPrice: 45000\nItem: Golden Rice", "direct-invoice", directPhone);
     assert.match(sent.at(-1)!, /Invoice draft/);
     await inbound("CONFIRM", "direct-invoice-confirm", directPhone);
     assert.match(sent.at(-1)!, /was created as a draft/);
@@ -219,6 +224,26 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
     assert.equal(magic.existing,true);
     const directSession = await wa.finishWhatsAppAuth({whatsappLinkToken:magicToken,proof:magic.proof,businessId:directBusiness.id});
     assert.equal(directSession.business.id,directBusiness.id);
+
+    // A laptop can initiate a browser-bound request and only the linked
+    // WhatsApp identity can explicitly approve the one-time session.
+    const deviceLogin = await import("../services/whatsapp-device-login.service");
+    const directContact = (await query<{id:string}>("SELECT id FROM whatsapp_contacts WHERE phone_e164='+15555550200'"))[0]!;
+    const deviceRequest = await deviceLogin.createDeviceLoginChallenge({ userAgent: "Mozilla/5.0 (Macintosh) Chrome/140.0", ip: "127.0.0.1" });
+    assert.equal((await deviceLogin.deviceLoginStatus(deviceRequest.browserToken)).status,"pending");
+    const loginCode = deviceLogin.normalizeDeviceLoginCode(deviceRequest.code)!;
+    assert.match(await deviceLogin.handleDeviceLoginCommand(directContact.id,{action:"request",code:loginCode}),/Sign in to Direct Market/);
+    assert.equal((await deviceLogin.deviceLoginStatus(deviceRequest.browserToken)).status,"awaiting_approval");
+    assert.match(await deviceLogin.handleDeviceLoginCommand(directContact.id,{action:"approve",code:loginCode}),/Approved/);
+    const deviceSession = await deviceLogin.finishDeviceLogin(deviceRequest.browserToken);
+    assert.equal(deviceSession.business.id,directBusiness.id);
+    await assert.rejects(deviceLogin.finishDeviceLogin(deviceRequest.browserToken),/Approve this sign-in request/);
+
+    const deniedRequest = await deviceLogin.createDeviceLoginChallenge({ userAgent: "Mozilla/5.0 (Windows NT 10.0) Firefox/130.0" });
+    const deniedCode = deviceLogin.normalizeDeviceLoginCode(deniedRequest.code)!;
+    await deviceLogin.handleDeviceLoginCommand(directContact.id,{action:"request",code:deniedCode});
+    assert.match(await deviceLogin.handleDeviceLoginCommand(directContact.id,{action:"deny",code:deniedCode}),/denied/);
+    await assert.rejects(deviceLogin.finishDeviceLogin(deniedRequest.browserToken),/denied/);
   } finally {
     globalThis.fetch = originalFetch;
     nodemailer.createTransport = originalTransport;

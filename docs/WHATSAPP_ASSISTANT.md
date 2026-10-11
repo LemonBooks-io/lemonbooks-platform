@@ -6,21 +6,53 @@ LemonBooks uses one shared, Lemon-owned WhatsApp number as a private business as
 
 - **Create an account:** send `GET STARTED`, enter the business name, optionally add an email, review the summary, then send `CREATE`.
 - **Connect an existing workspace:** send `CONNECT`, open the 10-minute private link, sign in by email code, and explicitly approve the link.
-- **Return to the portal:** send `LOGIN`. The one-time link opens the linked workspace without a password.
+- **Return to the portal from WhatsApp:** send `LOGIN`. The one-time link opens the linked workspace without a password.
+- **Sign in on another device:** select **Continue with WhatsApp** on the login page. On desktop, scan the QR code or open WhatsApp directly, send the prepared `LOGIN XXXX-XXXX` message, then explicitly reply `APPROVE XXXX-XXXX`. The browser signs in automatically after approval. Requests expire after five minutes and work once.
 - **Multiple businesses:** send `BUSINESSES`, then `SWITCH | business name`.
 - **Disconnect:** send `UNLINK`, or use **Settings → WhatsApp assistant**.
 
 ## Bookkeeping commands
 
 ```text
-INVOICE | customer | item | quantity | unit price
-ADD ITEM | item | quantity | selling price | cost (optional)
-SALE | customer | item | quantity | unit price | cash/transfer/card/POS
-EXPENSE | description | amount | category | vendor (optional)
-PAYMENT | invoice number | amount | cash/transfer | reference (optional)
+ADD ITEM
+Name: POS Ipad
+Quantity: 20
+Price: 12500
+Cost: 5000
+Description: Epson low data POS ipad
+
+ADD CUSTOMER
+Name: Ada Okafor
+Phone: 08012345678
+Email: ada@example.com
+
+INVOICE
+Customer: Ada
+Item: Rice
+Quantity: 2
+Price: 45000
+
+SALE
+Customer: Ada
+Item: Rice
+Quantity: 2
+Price: 45000
+Method: POS
+
+EXPENSE
+Description: Generator fuel
+Amount: 25000
+Category: Utilities
+
+PAYMENT
+Invoice: INV-00001
+Amount: 25000
+Method: transfer
 ```
 
-Every mutation is first stored as an expiring draft. The merchant must reply `CONFIRM`; `CANCEL` discards it. A reported payment creates a pending payment claim and does not confirm money until bank or provider evidence is matched.
+Labels are case-insensitive, surrounding spaces are trimmed, and fields can appear in any order. `Cost` and `Description` are optional for items. Common shortcuts include `AI` for **Add Item**, `AC` for **Add Customer**, and contextual field labels such as `N`, `Q`, `P`, `C`, and `D`.
+
+Items and customers are safe workspace records, so complete commands save them immediately to the same catalogue and customer list used by the web dashboard. Invoice, sale, expense, and payment commands create an expiring draft; the merchant must reply `CONFIRM`, while `CANCEL` discards it. A reported payment creates a pending payment claim and does not confirm money until bank or provider evidence is matched. The older pipe-delimited commands remain supported for compatibility.
 
 ## Meta configuration
 
@@ -61,4 +93,4 @@ npm run build -w @lemonbooks/api
 npm run build -w @lemonbooks/web
 ```
 
-The database-backed suite covers chat-native registration, existing-account linking, one-time login, email-code login, replay protection, workspace isolation, action confirmation, provider failure retry, and opt-out behavior.
+The database-backed suite covers chat-native registration, existing-account linking, browser-bound WhatsApp approval, one-time login, denial and replay protection, email-code login, workspace isolation, action confirmation, provider failure retry, and opt-out behavior.

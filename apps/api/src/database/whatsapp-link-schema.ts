@@ -45,6 +45,32 @@ CREATE TABLE IF NOT EXISTS whatsapp_auth_challenges (
 );
 ALTER TABLE whatsapp_auth_challenges ADD COLUMN IF NOT EXISTS send_count integer NOT NULL DEFAULT 1;
 
+CREATE TABLE IF NOT EXISTS whatsapp_device_login_challenges (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ code_hash text NOT NULL UNIQUE,
+ browser_token_hash text NOT NULL UNIQUE,
+ status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','awaiting_approval','approved','denied','consumed','cancelled','expired')),
+ contact_id uuid REFERENCES whatsapp_contacts(id) ON DELETE SET NULL,
+ user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+ business_id uuid REFERENCES businesses(id) ON DELETE CASCADE,
+ device_label text NOT NULL,
+ requester_ip_hash text,
+ expires_at timestamptz NOT NULL,
+ claimed_at timestamptz,
+ approved_at timestamptz,
+ denied_at timestamptz,
+ consumed_at timestamptz,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ updated_at timestamptz NOT NULL DEFAULT now(),
+ FOREIGN KEY(business_id,user_id) REFERENCES memberships(business_id,user_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS whatsapp_device_login_expiry_idx
+ ON whatsapp_device_login_challenges(expires_at) WHERE status IN ('pending','awaiting_approval','approved');
+CREATE INDEX IF NOT EXISTS whatsapp_device_login_contact_idx
+ ON whatsapp_device_login_challenges(contact_id,created_at DESC) WHERE status='awaiting_approval';
+CREATE INDEX IF NOT EXISTS whatsapp_device_login_cleanup_idx
+ ON whatsapp_device_login_challenges(updated_at) WHERE status IN ('denied','consumed','cancelled','expired');
+
 CREATE TABLE IF NOT EXISTS whatsapp_onboarding_sessions (
  contact_id uuid PRIMARY KEY REFERENCES whatsapp_contacts(id) ON DELETE CASCADE,
  conversation_id uuid NOT NULL REFERENCES whatsapp_conversations(id) ON DELETE CASCADE,

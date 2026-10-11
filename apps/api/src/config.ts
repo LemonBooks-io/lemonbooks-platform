@@ -19,6 +19,7 @@ export const env = {
   paystackCallbackUrl: process.env.PAYSTACK_CALLBACK_URL?.trim() ?? `${(process.env.CLIENT_URL ?? "http://localhost:5173").split(",")[0]!.trim()}/payments/paystack/callback`,
   publicWebUrl: process.env.PUBLIC_WEB_URL?.trim() ?? (process.env.CLIENT_URL ?? "http://localhost:5173").split(",")[0]!.trim(),
   publicApiUrl: process.env.PUBLIC_API_URL?.trim() ?? `http://localhost:${Number(process.env.PORT ?? 5000)}`,
+  oynkMartApiUrl: process.env.OYNK_MART_API_URL?.trim().replace(/\/$/, "") ?? "",
   whatsapp: {
     appId: process.env.META_APP_ID?.trim() ?? "",
     appSecret: process.env.WHATSAPP_APP_SECRET?.trim() ?? process.env.META_APP_SECRET?.trim() ?? "",
@@ -29,6 +30,7 @@ export const env = {
     platformTenantSlug: process.env.WHATSAPP_PLATFORM_TENANT_SLUG?.trim() ?? "",
     platformWabaId: process.env.WHATSAPP_PLATFORM_WABA_ID?.trim() ?? "",
     platformPhoneNumberId: process.env.WHATSAPP_PLATFORM_PHONE_NUMBER_ID?.trim() ?? "",
+    platformDisplayNumber: process.env.WHATSAPP_PLATFORM_DISPLAY_NUMBER?.replace(/\D/g, "") ?? "",
     platformAccessToken: process.env.WHATSAPP_PLATFORM_ACCESS_TOKEN?.trim() ?? "",
   },
   smtp: {

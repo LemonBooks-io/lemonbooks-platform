@@ -1,7 +1,7 @@
 import { env } from "../config";
 import { query } from "../database/pool";
 import { encryptMetaCredentials } from "./meta-whatsapp.service";
-import { createWhatsAppLink, getWhatsAppLinkedWorkspace, unlinkWhatsAppAccount } from "./whatsapp-account-link.service";
+import { handleWhatsAppAssistant } from "./whatsapp-assistant.service";
 
 export type PlatformReplyInput = {
   body: string;
@@ -16,7 +16,7 @@ export function platformReplyFor(input: PlatformReplyInput): string | null {
   if (/^(stop|unsubscribe|opt\s*out)$/i.test(body)) return null;
   if (isAccountCommand(body)) {
     if (input.workspaceName && !input.registrationUrl) return `This WhatsApp number is connected to ${input.workspaceName}. Reply LOGIN to open your workspace, or UNLINK to disconnect.`;
-    return `Create a workspace or sign in to an existing account to connect this WhatsApp number:\n${input.registrationUrl ?? `${input.publicWebUrl}/login?mode=signup`}\n\nYour private link expires in 30 minutes. Do not forward it. We will confirm here after you finish. Never send passwords, card PINs, or OTPs in this chat.`;
+    return "Reply GET STARTED to create a LemonBooks business here, or CONNECT to link an existing workspace.";
   }
   if (/\b(paid|payment|transfer|transferred|receipt)\b/i.test(body)) {
     return "Thanks — I captured your payment message for review. A payment is not marked as confirmed until LemonBooks matches it to provider or bank evidence. Include the invoice number and amount if available.";
@@ -32,19 +32,8 @@ function isAccountCommand(body: string) {
   return /^(register|sign\s*up|create\s+(?:an?\s+)?account|get\s+started|connect|link|login|sign\s*in)$/i.test(body.trim());
 }
 
-export async function linkedPlatformReply(input: PlatformReplyInput & { contactId: string; conversationId: string }) {
-  if (/^unlink$/i.test(input.body.trim())) {
-    await unlinkWhatsAppAccount(input.contactId);
-    return "Your WhatsApp number has been disconnected from your LemonBooks account. Your business records are unchanged. Reply CONNECT to link an account again.";
-  }
-  const workspace = await getWhatsAppLinkedWorkspace(input.contactId);
-  const registrationUrl = isAccountCommand(input.body)
-    ? await createWhatsAppLink(input.contactId, input.conversationId) : undefined;
-  const reply = platformReplyFor({ ...input, registrationUrl, workspaceName: workspace?.name });
-  if (workspace && reply && !isAccountCommand(input.body) && /\b(invoice|order|sale|expense|stock|inventory|restock|record|paid|payment|transfer|transferred|receipt)\b/i.test(input.body)) {
-    return `Workspace: ${workspace.name}\n\n${reply}`;
-  }
-  return reply;
+export async function linkedPlatformReply(input: PlatformReplyInput & { contactId: string; conversationId: string; sourceMessageId: string }) {
+  return handleWhatsAppAssistant(input);
 }
 
 export async function provisionWhatsAppPlatformConnection() {
@@ -52,8 +41,16 @@ export async function provisionWhatsAppPlatformConnection() {
   if (values.every(value => !value)) return;
   if (values.some(value => !value)) throw new Error("Complete all WHATSAPP_PLATFORM_* environment variables or remove all of them");
   if (!env.whatsapp.credentialsKey) throw new Error("INTEGRATION_CREDENTIALS_KEY is required for the WhatsApp platform connection");
-  const business = (await query<{ id: string }>("SELECT id FROM businesses WHERE tenant_slug=$1", [env.whatsapp.platformTenantSlug]))[0];
-  if (!business) throw new Error(`WhatsApp platform tenant '${env.whatsapp.platformTenantSlug}' does not exist`);
+  // The shared LemonBooks assistant is platform infrastructure. A fresh
+  // database must be able to start before the first merchant signs up, so
+  // bootstrap its isolated operator tenant from the explicit platform slug.
+  const business = (await query<{ id: string }>(
+    `INSERT INTO businesses(tenant_slug,name,email,country_code,currency,onboarding_completed)
+     VALUES($1,'LemonBooks Platform','platform@lemonbooks.io','NG','NGN',true)
+     ON CONFLICT(tenant_slug) DO UPDATE SET updated_at=now()
+     RETURNING id`,
+    [env.whatsapp.platformTenantSlug],
+  ))[0]!;
   const existingConnection = (await query<{ business_id: string }>(
     `SELECT business_id FROM integration_connections
      WHERE provider='meta_whatsapp' AND environment='production'

@@ -1,7 +1,7 @@
 import { FormEvent, ReactNode, useEffect, useId, useRef } from "react";
 import { CloseCircle } from "iconsax-react";
 
-export function Modal({ open, title, description, children, submitLabel, busy, onClose, onSubmit, wide = false }: { open: boolean; title: string; description?: string; children: ReactNode; submitLabel: string; busy?: boolean; onClose: () => void; onSubmit: (event: FormEvent) => void; wide?: boolean }) {
+export function Modal({ open, title, description, children, submitLabel, busy, busyLabel="Saving…", onClose, onSubmit, wide = false, className = "" }: { open: boolean; title: string; description?: string; children: ReactNode; submitLabel: string; busy?: boolean; busyLabel?:string; onClose: () => void; onSubmit: (event: FormEvent) => void; wide?: boolean; className?: string }) {
   const titleId = useId(); const descriptionId = useId(); const formRef = useRef<HTMLFormElement>(null);
   const closeRef = useRef(onClose); const busyRef = useRef(busy); closeRef.current = onClose; busyRef.current = busy;
   useEffect(() => {
@@ -20,5 +20,5 @@ export function Modal({ open, title, description, children, submitLabel, busy, o
     return () => { cancelAnimationFrame(frame); document.removeEventListener("keydown", keydown); document.body.style.overflow = originalOverflow; previous?.focus(); };
   }, [open]);
   if (!open) return null;
-  return <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined}><button className="modal-backdrop" onClick={onClose} aria-label="Close dialog" disabled={busy}/><form ref={formRef} className={`modal ${wide ? "modal--wide" : ""}`} onSubmit={onSubmit} aria-busy={busy}><header><div><h2 id={titleId}>{title}</h2>{description && <p id={descriptionId}>{description}</p>}</div><button type="button" onClick={onClose} aria-label="Close dialog" disabled={busy}><CloseCircle size={24}/></button></header><div className="modal-body">{children}</div><footer><button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button><button className="primary-button primary-button--compact" disabled={busy}>{busy ? "Saving…" : submitLabel}</button></footer></form></div>;
+  return <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined}><button className="modal-backdrop" onClick={onClose} aria-label="Close dialog" disabled={busy}/><form ref={formRef} className={`modal ${wide ? "modal--wide" : ""} ${className}`} onSubmit={onSubmit} aria-busy={busy}><header><div><h2 id={titleId}>{title}</h2>{description && <p id={descriptionId}>{description}</p>}</div><button type="button" onClick={onClose} aria-label="Close dialog" disabled={busy}><CloseCircle size={24}/></button></header><div className="modal-body">{children}</div><footer><button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button><button className="primary-button primary-button--compact" disabled={busy}>{busy ? busyLabel : submitLabel}</button></footer></form></div>;
 }

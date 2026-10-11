@@ -13,7 +13,7 @@ export function hashWhatsAppLink(token: unknown): string | null {
     ? crypto.createHash("sha256").update(token).digest("hex") : null;
 }
 
-export async function createWhatsAppLink(contactId: string, conversationId: string) {
+export async function createWhatsAppLink(contactId: string, conversationId: string, purpose: "link" | "login" = "link") {
   const token = crypto.randomBytes(32).toString("hex");
   await transaction(async client => {
     // Serialize issuance against linking and invalidate earlier links for this sender.
@@ -25,14 +25,21 @@ export async function createWhatsAppLink(contactId: string, conversationId: stri
         AND i.capabilities->>'platformEntryPoint'='true' FOR UPDATE OF c`, [contactId, conversationId]);
     if (!rows.length) throw new HttpError(409, "WhatsApp connection is unavailable");
     await client.query("UPDATE whatsapp_account_link_tickets SET consumed_at=now() WHERE contact_id=$1 AND consumed_at IS NULL", [contactId]);
-    await client.query(`INSERT INTO whatsapp_account_link_tickets(token_hash,contact_id,conversation_id,expires_at)
-      VALUES($1,$2,$3,now()+interval '30 minutes')`, [hashWhatsAppLink(token), contactId, conversationId]);
+    await client.query(`INSERT INTO whatsapp_account_link_tickets(token_hash,contact_id,conversation_id,purpose,expires_at)
+      VALUES($1,$2,$3,$4,now()+interval '10 minutes')`, [hashWhatsAppLink(token), contactId, conversationId, purpose]);
   });
-  const url = new URL("/login", env.publicWebUrl);
-  url.searchParams.set("mode", "signup");
+  const url = new URL("/auth", env.publicWebUrl);
+  url.searchParams.set("mode", "signin");
   // Fragments are not sent in HTTP requests or Referer headers.
-  url.hash = `whatsapp_link=${token}`;
+  url.hash = `${purpose === "login" ? "whatsapp_login" : "whatsapp_link"}=${token}`;
   return url.toString();
+}
+
+export async function createWhatsAppLoginLink(contactId: string, conversationId: string) {
+  const linked = (await query<{ user_id: string }>(`SELECT l.user_id FROM whatsapp_account_links l
+    JOIN memberships m ON m.user_id=l.user_id AND m.business_id=l.business_id WHERE l.contact_id=$1`, [contactId]))[0];
+  if (!linked) throw new HttpError(409, "Connect this WhatsApp number before signing in.");
+  return createWhatsAppLink(contactId, conversationId, "login");
 }
 
 // Called only after account authentication, within the same transaction as signup/linking.
@@ -52,11 +59,11 @@ export async function completeWhatsAppLink(client: PoolClient, hash: string | nu
       OR EXISTS(SELECT 1 FROM whatsapp_auth_identities a WHERE a.user_id=u.id))`, [userId, businessId]);
   if (!member) return unavailable;
   const { rows: [existing] } = await client.query("SELECT business_id,user_id FROM whatsapp_account_links WHERE contact_id=$1", [ticket.contact_id]);
-  if (existing && (existing.business_id !== businessId || existing.user_id !== userId)) {
+  if (existing && existing.user_id !== userId) {
     return { status: "unavailable", message: "This WhatsApp number is already linked to another account. Send UNLINK from that WhatsApp number before connecting a different account." };
   }
   await client.query(`INSERT INTO whatsapp_account_links(contact_id,business_id,user_id) VALUES($1,$2,$3)
-    ON CONFLICT(contact_id) DO NOTHING`, [ticket.contact_id, businessId, userId]);
+    ON CONFLICT(contact_id) DO UPDATE SET business_id=EXCLUDED.business_id,user_id=EXCLUDED.user_id,created_at=now()`, [ticket.contact_id, businessId, userId]);
   await client.query("UPDATE whatsapp_account_link_tickets SET consumed_at=now() WHERE id=$1", [ticket.id]);
   await client.query(`INSERT INTO integration_audit_log(business_id,actor_type,actor_id,action,resource_type,resource_id)
     VALUES($1,'user',$2,'whatsapp.account_linked','whatsapp_contact',$3)`, [businessId, userId, ticket.contact_id]);

@@ -1,4 +1,4 @@
-import { createContext, ReactNode, useContext, useMemo, useState } from "react";
+import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import type { Business, Session } from "../lib/types";
 
 type SessionContextValue = {
@@ -13,6 +13,11 @@ function loadSession(): Session | null {
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSessionState] = useState<Session | null>(loadSession);
+  useEffect(() => {
+    const expire = () => { localStorage.removeItem(STORAGE_KEY); setSessionState(null); };
+    window.addEventListener("lemonbooks:session-expired", expire);
+    return () => window.removeEventListener("lemonbooks:session-expired", expire);
+  }, []);
   const value = useMemo<SessionContextValue>(() => ({
     session,
     setSession(next) { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); setSessionState(next); },

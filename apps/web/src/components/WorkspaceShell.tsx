@@ -1,12 +1,11 @@
 import { ReactNode, useState } from "react";
-import { Add, Bank, Box, Building4, Card, CloseCircle, DocumentText, Home2, LogoutCurve, Menu, Message, People, Profile2User, Setting2 } from "iconsax-react";
+import { Add, Bank, Box, Building4, Card, CloseCircle, DocumentText, Home2, LogoutCurve, Menu, People, Profile2User, Setting2 } from "iconsax-react";
 import { NavLink } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
 
 const navigation = [
   { label: "Workspace", links: [["/", "Overview", Home2]] },
   { label: "Money", links: [["/transactions", "Payments", Card], ["/invoices", "Invoices", DocumentText], ["/banking", "Banking", Bank]] },
-  { label: "Connect", links: [["/whatsapp", "WhatsApp", Message]] },
   { label: "Business", links: [["/clients", "Clients", People], ["/items", "Items & inventory", Box], ["/team", "Team", Profile2User], ["/settings", "Settings", Setting2]] },
 ] as const;
 

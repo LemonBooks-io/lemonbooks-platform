@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { SessionProvider, useSession } from "./context/SessionContext";
 import { AuthPage } from "./pages/AuthPage";
+import { OynkConnectPage } from "./pages/OynkConnectPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ClientsPage } from "./pages/ClientsPage";
@@ -15,7 +16,6 @@ import { PaystackCallbackPage } from "./pages/PaystackCallbackPage";
 import { PublicInvoicePage } from "./pages/PublicInvoicePage";
 import { CustomerPortalPage } from "./pages/CustomerPortalPage";
 import { BankingPage } from "./pages/BankingPage";
-import { WhatsAppEntryPage } from "./pages/WhatsAppEntryPage";
 import { ReconciliationOperationsPage } from "./pages/ReconciliationOperationsPage";
 import { DataDeletionPage } from "./pages/DataDeletionPage";
 import { PrivacyPolicyPage } from "./pages/PrivacyPolicyPage";
@@ -36,18 +36,21 @@ function ProductRoutes() {
     return <Navigate to={`/customer-portal${suffix}${location.search}${location.hash}`} replace />;
   }
   if (location.pathname.startsWith("/customer-portal")) return <Routes><Route path="/customer-portal/*" element={<CustomerPortalPage/>}/></Routes>;
+  if (location.pathname === "/connect/oynk") return <OynkConnectPage />;
   if (!session && location.pathname === "/") return <PublicSitePage/>;
-  if (!session && location.pathname === "/login" && new URLSearchParams(location.hash.slice(1)).has("whatsapp_link")) return <WhatsAppAuthPage />;
+  if (!session && ["/auth","/login"].includes(location.pathname) && new URLSearchParams(location.hash.slice(1)).has("whatsapp_login")) return <WhatsAppAuthPage />;
+  if (!session && location.pathname === "/login") return <Navigate to={`/auth?mode=${new URLSearchParams(location.search).get("mode")==="signup"?"signup":"signin"}${location.hash}`} replace/>;
+  if (!session && location.pathname === "/signup") return <Navigate to={`/auth?mode=signup${location.hash}`} replace/>;
   if (!session) return <AuthPage />;
-  if (location.pathname === "/login" && new URLSearchParams(location.hash.slice(1)).has("whatsapp_link")) return <WhatsAppAccountLinkPage />;
+  if (["/auth","/login"].includes(location.pathname) && new URLSearchParams(location.hash.slice(1)).has("whatsapp_link")) return <WhatsAppAccountLinkPage />;
   if (!session.business.onboardingCompleted) return <OnboardingPage />;
   return <Routes>
     <Route path="/" element={<DashboardPage />} />
     <Route path="/transactions" element={<TransactionsPage />} />
     <Route path="/banking" element={<BankingPage />} />
     <Route path="/banking/operations" element={<ReconciliationOperationsPage />} />
-    <Route path="/whatsapp" element={<WhatsAppEntryPage />} />
-    <Route path="/whatsapp/connect" element={<Navigate to="/whatsapp" replace />} />
+    <Route path="/whatsapp" element={<Navigate to="/settings?tab=assistant" replace />} />
+    <Route path="/whatsapp/connect" element={<Navigate to="/settings?tab=assistant" replace />} />
     <Route path="/invoices" element={<InvoicesPage />} />
     <Route path="/invoices/new" element={<CreateInvoicePage />} />
     <Route path="/invoices/:id" element={<InvoiceDetailPage />} />

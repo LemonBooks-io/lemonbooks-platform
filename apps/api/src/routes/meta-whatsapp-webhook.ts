@@ -38,7 +38,7 @@ export async function metaWebhookReceiver(req: Request, res: Response, next: Nex
 async function ingestMessage(connection: Record<string, any>, message: Record<string, any>, profile?: Record<string, any>) {
   const providerEventId = `message:${message.id}`;
   const occurredAt = new Date(Number(message.timestamp) * 1000);
-  const body = String(message.text?.body ?? message.button?.text ?? message.interactive?.button_reply?.title ?? "");
+  const body = messageBody(message);
   const ingested = await transaction(async client => {
     const event = (await client.query<Record<string, any>>(`INSERT INTO integration_events(business_id,connection_id,provider,environment,provider_event_id,event_type,payload_hash,raw_payload,signature_valid,occurred_at,status,processed_at) VALUES($1,$2,'meta_whatsapp','production',$3,'messages',$4,$5,true,$6,'processed',now()) ON CONFLICT(provider,environment,provider_event_id) DO NOTHING RETURNING id`, [connection.business_id, connection.id, providerEventId, crypto.createHash("sha256").update(JSON.stringify(message)).digest("hex"), JSON.stringify(message), occurredAt])).rows[0];
     if (!event) return null;
@@ -58,7 +58,7 @@ async function ingestMessage(connection: Record<string, any>, message: Record<st
     return;
   }
   try {
-    const reply = await linkedPlatformReply({ body, contactId: ingested.contactId, conversationId: ingested.conversationId, displayName: profile?.profile?.name, publicWebUrl: env.publicWebUrl });
+    const reply = await linkedPlatformReply({ body, contactId: ingested.contactId, conversationId: ingested.conversationId, sourceMessageId: String(message.id), displayName: profile?.profile?.name, publicWebUrl: env.publicWebUrl });
     if (!reply) return;
     const credentials = decryptMetaCredentials(String(connection.encrypted_credentials ?? ""));
     const providerId = await sendMetaMessage({ accessToken: credentials.accessToken, phoneNumberId: String(connection.external_account_id), to: ingested.phone, body: reply });
@@ -72,6 +72,18 @@ async function ingestMessage(connection: Record<string, any>, message: Record<st
     await query("UPDATE integration_connections SET last_error_code=$1,updated_at=now() WHERE id=$2", [messageText.slice(0, 120), connection.id]);
     console.error(`WhatsApp platform reply failed: ${messageText}`);
   }
+}
+
+function messageBody(message: Record<string, any>) {
+  const interactive = message.interactive?.button_reply ?? message.interactive?.list_reply;
+  const contact = message.contacts?.[0];
+  return String(message.text?.body
+    ?? message.button?.text
+    ?? interactive?.title
+    ?? interactive?.id
+    ?? message.image?.caption
+    ?? message.document?.caption
+    ?? (contact ? `CONTACT | ${contact.name?.formatted_name ?? "Customer"} | ${contact.phones?.[0]?.phone ?? ""}` : "")).trim();
 }
 
 function isPlatformConnection(connection: Record<string, any>) {

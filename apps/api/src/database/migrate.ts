@@ -52,6 +52,17 @@ CREATE TABLE IF NOT EXISTS signup_challenges (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS email_login_challenges (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email text NOT NULL,
+  tenant_slug text,
+  otp_hash text NOT NULL,
+  attempts integer NOT NULL DEFAULT 0,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS email_login_challenges_email_idx ON email_login_challenges(lower(email),created_at DESC);
+
 CREATE TABLE IF NOT EXISTS clients (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
@@ -441,7 +452,86 @@ CREATE INDEX IF NOT EXISTS reconciliation_approvals_business_idx ON reconciliati
 CREATE UNIQUE INDEX IF NOT EXISTS reconciliation_approvals_pending_idx ON reconciliation_approvals(bank_transaction_id) WHERE status='pending';
 `;
 
+const martSchema = `
+-- Oynk Mart is an optional external catalog. The merchant controls publication here.
+CREATE TABLE IF NOT EXISTS mart_approval_codes (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+ user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ code_hash text NOT NULL,
+ attempts integer NOT NULL DEFAULT 0,
+ expires_at timestamptz NOT NULL,
+ verified_at timestamptz,
+ consumed_at timestamptz,
+ created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS mart_approval_codes_lookup ON mart_approval_codes(business_id,user_id,created_at DESC);
+ALTER TABLE mart_approval_codes ADD COLUMN IF NOT EXISTS verified_at timestamptz;
+CREATE TABLE IF NOT EXISTS mart_connect_auth_limits (
+ key_hash text PRIMARY KEY,
+ attempts integer NOT NULL DEFAULT 0,
+ window_started_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS mart_inventory_requests (
+ business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+ request_id uuid NOT NULL,
+ payload_hash text NOT NULL,
+ response jsonb NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(business_id,request_id)
+);
+ALTER TABLE items ADD COLUMN IF NOT EXISTS mart_published boolean NOT NULL DEFAULT false;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS image_urls jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(image_urls)='array' AND jsonb_array_length(image_urls)<=5);
+CREATE TABLE IF NOT EXISTS item_media (
+ id uuid PRIMARY KEY,
+ business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+ content_hash text NOT NULL,
+ content bytea NOT NULL CHECK(octet_length(content)>0 AND octet_length(content)<=2097152),
+ created_at timestamptz NOT NULL DEFAULT now(),
+ UNIQUE(business_id,content_hash)
+);
+CREATE INDEX IF NOT EXISTS item_media_owner_idx ON item_media(business_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS mart_connections (
+ business_id uuid PRIMARY KEY REFERENCES businesses(id) ON DELETE CASCADE,
+ oynk_connection_id uuid NOT NULL,
+ encrypted_token text NOT NULL,
+ status text NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused')),
+ last_success_at timestamptz,
+ last_error text,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE mart_connections ADD COLUMN IF NOT EXISTS media_base_url text;
+CREATE TABLE IF NOT EXISTS mart_sync_queue (
+ item_id uuid PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+ business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+ revision bigint NOT NULL,
+ event_id uuid NOT NULL DEFAULT gen_random_uuid(),
+ attempts integer NOT NULL DEFAULT 0,
+ available_at timestamptz NOT NULL DEFAULT now(),
+ lease_id uuid,
+ lease_until timestamptz,
+ last_error text,
+ updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE mart_sync_queue ADD COLUMN IF NOT EXISTS event_id uuid NOT NULL DEFAULT gen_random_uuid();
+CREATE INDEX IF NOT EXISTS mart_sync_due_idx ON mart_sync_queue(available_at) WHERE lease_until IS NULL;
+CREATE OR REPLACE FUNCTION enqueue_mart_item() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF EXISTS(SELECT 1 FROM mart_connections WHERE business_id=NEW.business_id AND status='active') THEN
+  INSERT INTO mart_sync_queue(item_id,business_id,revision) VALUES(NEW.id,NEW.business_id,NEW.sync_version)
+  ON CONFLICT(item_id) DO UPDATE SET revision=EXCLUDED.revision,event_id=gen_random_uuid(),attempts=0,available_at=now(),lease_id=NULL,lease_until=NULL,last_error=NULL,updated_at=now();
+ END IF;
+ RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS items_mart_enqueue ON items;
+CREATE TRIGGER items_mart_enqueue AFTER INSERT OR UPDATE OF name,description,kind,sku,price,stock_quantity,active,deleted_at,mart_published,image_urls,sync_version ON items
+ FOR EACH ROW EXECUTE FUNCTION enqueue_mart_item();
+`;
+
 export async function migrate(): Promise<void> {
   await pool.query(schema);
+  await pool.query(martSchema);
   await pool.query(whatsappLinkSchema);
 }

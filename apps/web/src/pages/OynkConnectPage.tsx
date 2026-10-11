@@ -1,0 +1,32 @@
+import { useEffect, useState, type FormEvent } from 'react';
+import { post } from '../lib/api';
+import './oynk-connect.css';
+
+type Prefill={type:string;state:string;email?:string};
+type Credential={type:string;state:string;id?:string;token?:string};
+type Challenge={challengeId:string;emailHint:string;businessName:string};
+
+export function OynkConnectPage(){
+ const params=new URLSearchParams(window.location.search);
+ const state=params.get('state')??'';const origin=params.get('origin')??'';const opener=window.opener as Window|null;
+ const allowed=(import.meta.env.VITE_OYNK_CONSOLE_URL??'http://localhost:5174').replace(/\/$/,'');
+ const valid=(()=>{try{const url=new URL(origin);return Boolean(opener&&state&&origin===allowed&&url.origin===origin&&(url.protocol==='https:'||['localhost','127.0.0.1'].includes(url.hostname)));}catch{return false;}})();
+ const [email,setEmail]=useState('');const [tenantSlug,setTenantSlug]=useState('');
+ const [challenge,setChallenge]=useState<Challenge|null>(null);const [code,setCode]=useState('');const [step,setStep]=useState<'credentials'|'code'|'waiting'|'done'>('credentials');
+ const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+ useEffect(()=>{if(!valid||!opener)return;const receive=(event:MessageEvent<Prefill>)=>{if(event.origin!==origin||event.source!==opener||event.data?.state!==state||event.data.type!=='OYNK_CONNECT_PREFILL')return;setEmail(current=>current||event.data.email||'');};window.addEventListener('message',receive);opener.postMessage({type:'LEMONBOOKS_CONNECT_FORM_READY',state},origin);return()=>window.removeEventListener('message',receive);},[valid,opener,origin,state]);
+ useEffect(()=>{if(!valid||!opener||!challenge)return;const receive=async(event:MessageEvent<Credential>)=>{if(event.origin!==origin||event.source!==opener||event.data?.state!==state||event.data.type!=='OYNK_CONNECT_CREDENTIAL')return;if(typeof event.data.id!=='string'||typeof event.data.token!=='string')return;setBusy(true);setError('');try{await post('/integrations/oynk-mart/connect-auth/finish',{challengeId:challenge.challengeId,connectionId:event.data.id,token:event.data.token});setStep('done');opener.postMessage({type:'LEMONBOOKS_CONNECT_DONE',state},origin);}catch(cause){setError(cause instanceof Error?cause.message:'The connection could not be completed.');opener.postMessage({type:'LEMONBOOKS_CONNECT_ERROR',state},origin);}finally{setBusy(false);}};window.addEventListener('message',receive);return()=>window.removeEventListener('message',receive);},[valid,opener,origin,state,challenge]);
+ async function start(event:FormEvent){event.preventDefault();if(!valid||busy)return;setBusy(true);setError('');try{const result=await post<Challenge>('/integrations/oynk-mart/connect-auth/start',{email:email.trim(),tenantSlug:tenantSlug.trim()});setChallenge(result);setStep('code');}catch(cause){setError(cause instanceof Error?cause.message:'We could not verify your details.');}finally{setBusy(false);}}
+ async function verify(event:FormEvent){event.preventDefault();if(!valid||!challenge||!/^\d{6}$/.test(code)||busy)return;setBusy(true);setError('');try{const result=await post<{businessId:string}>('/integrations/oynk-mart/connect-auth/verify',{challengeId:challenge.challengeId,code});setStep('waiting');opener?.postMessage({type:'LEMONBOOKS_CONNECT_READY',state,businessId:result.businessId},origin);}catch(cause){setError(cause instanceof Error?cause.message:'That code could not be verified.');}finally{setBusy(false);}}
+ function cancel(){if(valid)opener?.postMessage({type:'LEMONBOOKS_CONNECT_CANCEL',state},origin);window.close();}
+ return <main className="mart-connect-shell"><section className="mart-connect-card"><div className="mart-connect-brand"><span>LB</span><span className="mart-connect-link">↔</span><span>O</span></div><p className="eyebrow">LEMONBOOKS × OYNK MART</p><h1>Connect your inventory</h1><p className="mart-connect-lead">Bring your products, prices and stock to your Oynk storefront. This approval connects inventory only; it does not sign you in to LemonBooks.</p>
+  {!valid?<p className="form-error" role="alert">This connection request is invalid. Return to Oynk Mart and try again.</p>:<>
+   {error?<p className="form-error" role="alert">{error}</p>:null}
+   {step==='credentials'?<form onSubmit={event=>void start(event)} className="mart-connect-form"><label>LemonBooks email<input type="email" value={email} onChange={event=>setEmail(event.target.value)} autoComplete="email" required/></label><details><summary>More than one workspace?</summary><label>Workspace slug<input value={tenantSlug} onChange={event=>setTenantSlug(event.target.value)} placeholder="Your LemonBooks workspace"/></label></details><button className="primary-button" disabled={busy}>{busy?'Sending code…':'Continue with email'}</button><p className="mart-connect-help">New to LemonBooks? <a href="/auth?mode=signup" target="_blank" rel="noreferrer">Create a workspace</a>, then return here.</p></form>:null}
+   {step==='code'?<form onSubmit={event=>void verify(event)} className="mart-connect-form"><div className="mart-connect-approval"><strong>Approve this connection</strong><span>Enter the six-digit code sent to {challenge?.emailHint}. It expires in 10 minutes.</span></div><label>Approval code<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={event=>setCode(event.target.value.replace(/\D/g,'').slice(0,6))} placeholder="000000" className="otp-input" required/></label><button className="primary-button" disabled={busy||code.length!==6}>{busy?'Verifying…':'Approve connection'}</button><button type="button" className="text-button" onClick={()=>{setStep('credentials');setChallenge(null);setCode('');setError('');}}>Use different details or request a new code</button></form>:null}
+   {step==='waiting'?<div className="mart-connect-approval" role="status"><strong>Connecting {challenge?.businessName}…</strong><span>Your approval is verified. Oynk is completing the connection.</span></div>:null}
+   {step==='done'?<div className="mart-connect-approval" role="status"><strong>Connected</strong><span>You can return to Oynk Mart.</span></div>:null}
+   {step!=='done'?<button className="text-button mart-connect-cancel" type="button" onClick={cancel}>Cancel</button>:null}
+  </>}
+  <p className="mart-connect-foot">Oynk receives inventory access only. The email code expires quickly and can approve this connection only once.</p></section></main>;
+}

@@ -9,7 +9,7 @@ import { completeWhatsAppLink, hashWhatsAppLink } from "./whatsapp-account-link.
 import { decryptMetaCredentials, sendMetaMessage } from "./meta-whatsapp.service";
 
 async function ticket(client: PoolClient, token: unknown) {
-  const { rows: [row] } = await client.query(`SELECT t.id,c.id AS contact_id,c.phone_e164,
+  const { rows: [row] } = await client.query(`SELECT t.id,t.purpose,c.id AS contact_id,c.phone_e164,
     i.encrypted_credentials,i.external_account_id FROM whatsapp_account_link_tickets t
     JOIN whatsapp_contacts c ON c.id=t.contact_id JOIN integration_connections i ON i.id=c.connection_id
     WHERE t.token_hash=$1 AND t.consumed_at IS NULL AND t.expires_at>now()
@@ -22,9 +22,28 @@ async function ticket(client: PoolClient, token: unknown) {
   return row;
 }
 
+export async function beginWhatsAppMagicLogin(token: unknown) {
+  return transaction(async client => {
+    const t = await ticket(client, token);
+    if (t.purpose !== "login") throw new HttpError(400, "This is not a sign-in link.");
+    const { rows: identities } = await client.query(`SELECT user_id FROM whatsapp_auth_identities WHERE phone=$1
+      UNION SELECT user_id FROM whatsapp_account_links WHERE contact_id=$2`, [t.phone_e164, t.contact_id]);
+    if (identities.length !== 1) throw new HttpError(409, "This WhatsApp number is not linked to one LemonBooks identity.");
+    const proof = crypto.randomBytes(32).toString("hex");
+    await client.query(`INSERT INTO whatsapp_auth_challenges(ticket_id,otp_hash,expires_at,proof_hash,verified_at)
+      VALUES($1,'',now()+interval '5 minutes',$2,now()) ON CONFLICT(ticket_id) DO UPDATE SET
+      otp_hash='',expires_at=EXCLUDED.expires_at,proof_hash=EXCLUDED.proof_hash,verified_at=now(),attempts=0,sent_at=now()`, [t.id, hashWhatsAppLink(proof)]);
+    const { rows: workspaces } = await client.query(`SELECT b.id,b.name FROM memberships m JOIN businesses b ON b.id=m.business_id
+      WHERE m.user_id=$1 ORDER BY b.name`, [identities[0]!.user_id]);
+    if (!workspaces.length) throw new HttpError(403, "This account does not have an active workspace.");
+    return { proof, workspaces, existing: true };
+  });
+}
+
 export async function requestWhatsAppCode(token: unknown) {
   return transaction(async client => {
     const t = await ticket(client, token);
+    if (t.purpose === "login") throw new HttpError(400, "Open a fresh WhatsApp sign-in link instead.");
     const { rows: [rate] } = await client.query(`SELECT count(*)::int AS count FROM whatsapp_auth_challenges a
       JOIN whatsapp_account_link_tickets t ON t.id=a.ticket_id JOIN whatsapp_contacts c ON c.id=t.contact_id
       WHERE c.phone_e164=$1 AND a.sent_at>now()-interval '1 minute'`, [t.phone_e164]);

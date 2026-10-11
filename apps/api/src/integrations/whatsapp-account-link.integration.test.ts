@@ -37,9 +37,9 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
     const business = (await query<{ id: string }>("INSERT INTO businesses(name,email,tenant_slug) VALUES('Platform','platform@example.test','platform') RETURNING id"))[0]!;
     const connection = (await query<{ id: string }>(`INSERT INTO integration_connections(business_id,kind,provider,status,environment,external_account_id,capabilities,encrypted_credentials)
       VALUES($1,'whatsapp','meta_whatsapp','active','production','123','{"platformEntryPoint":true}',$2) RETURNING id`, [business.id, encryptMetaCredentials({ accessToken: "test-token" })]))[0]!;
-    async function inbound(body: string, id: string = crypto.randomUUID()) {
+    async function inbound(body: string, id: string = crypto.randomUUID(), from = "15555550100") {
       const payload = { entry: [{ changes: [{ value: { metadata: { phone_number_id: "123" }, contacts: [{ profile: { name: "Ada" } }],
-        messages: [{ id, from: "15555550100", timestamp: String(Math.floor(Date.now() / 1000)), type: "text", text: { body } }] } }] }] };
+        messages: [{ id, from, timestamp: String(Math.floor(Date.now() / 1000)), type: "text", text: { body } }] } }] }] };
       const rawBody = Buffer.from(JSON.stringify(payload));
       let status = 0; let error: unknown;
       await metaWebhookReceiver({ body: payload, rawBody, headers: { "x-hub-signature-256": `sha256=${crypto.createHmac("sha256", env.whatsapp.appSecret).update(rawBody).digest("hex")}` } } as any,
@@ -47,12 +47,12 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
       if (error) throw error;
       assert.equal(status, 200);
     }
-    await inbound("REGISTER", "first-message");
+    await inbound("CONNECT", "first-message");
     const linkUrl = sent.at(-1)!.match(/https:\/\/\S+/)![0];
     const token = new URLSearchParams(new URL(linkUrl).hash.slice(1)).get("whatsapp_link")!;
     assert.equal(token.length, 64);
     assert.equal(new URL(linkUrl).searchParams.has("whatsapp_link"), false);
-    await inbound("REGISTER", "first-message");
+    await inbound("CONNECT", "first-message");
     assert.equal(sent.length, 1, "duplicate webhook does not issue another link");
     const stored = (await query<{ body: string }>("SELECT body FROM whatsapp_messages WHERE direction='outbound'"))[0]!;
     assert.ok(!stored.body.includes(token), "link secret is redacted in inbox storage");
@@ -67,7 +67,7 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
     assert.equal(binding.business_id, registered.business.id);
     const replay = await transaction(c => links.completeWhatsAppLink(c, links.hashWhatsAppLink(token), binding.user_id, binding.business_id));
     assert.equal(replay.status, "unavailable");
-    const otherChallenge = await auth.startSignup({ name: "Other", businessName: "Other Shop", email: "other@example.test", password: "other-password-123" });
+    const otherChallenge = await auth.startSignup({ name: "Other", businessName: "Other Shop", email: "other@example.test" });
     const other = await auth.verifySignup(otherChallenge.challengeId, otp);
     const { rows: [conversationForCollision] } = await pool.query("SELECT id FROM whatsapp_conversations");
     const collisionUrl = await links.createWhatsAppLink(binding.contact_id, conversationForCollision.id);
@@ -83,7 +83,7 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
     await Promise.all([links.processWhatsAppLinkNotifications(), links.processWhatsAppLinkNotifications()]);
     assert.equal(sent.filter(s => s.includes("is ready and linked")).length, 1);
     await inbound("HELP");
-    assert.match(sent.at(-1)!, /connected to Ada Shop/);
+    assert.match(sent.at(-1)!, /Workspace: Ada Shop/);
     await inbound("UNLINK");
     assert.equal((await query("SELECT * FROM whatsapp_account_links")).length, 0);
     await inbound("CONNECT");
@@ -92,6 +92,11 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
     assert.equal((await query("SELECT * FROM whatsapp_account_links")).length, 0);
     const loggedIn = await auth.login("ada@example.test", "test-password-123", undefined, loginToken);
     assert.equal(loggedIn.whatsappLink?.status, "linked");
+    const emailChallenge=await auth.startEmailLogin("ada@example.test");
+    await assert.rejects(auth.verifyEmailLogin(emailChallenge.challengeId,"wrong"));
+    const passwordless=await auth.verifyEmailLogin(emailChallenge.challengeId,otp);
+    assert.equal(passwordless.user.id,loggedIn.user.id);
+    await assert.rejects(auth.verifyEmailLogin(emailChallenge.challengeId,otp),"email code cannot be reused");
     const { rows: [conversationForWindow] } = await pool.query("SELECT id FROM whatsapp_conversations");
     await query("UPDATE whatsapp_contacts SET service_window_expires_at=now()-interval '1 second'");
     const beforeClosedWindow = sent.length;
@@ -163,10 +168,8 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
     await assert.rejects(wa.finishWhatsAppAuth(signup));
     await query("UPDATE whatsapp_auth_challenges SET sent_at=now()-interval '2 minutes'");
     await inbound("LOGIN");
-    const returnToken = new URLSearchParams(new URL(sent.at(-1)!.match(/https:\/\/\S+/)![0]).hash.slice(1)).get("whatsapp_link")!;
-    await wa.requestWhatsAppCode(returnToken);
-    const loginOtp = sent.at(-1)!.match(/code is (\d{6})/)![1];
-    const returning = await wa.verifyWhatsAppCode(returnToken,loginOtp);
+    const returnToken = new URLSearchParams(new URL(sent.at(-1)!.match(/https:\/\/\S+/)![0]).hash.slice(1)).get("whatsapp_login")!;
+    const returning = await wa.beginWhatsAppMagicLogin(returnToken);
     assert.equal(returning.existing,true);
     await assert.rejects(wa.finishWhatsAppAuth({whatsappLinkToken:returnToken,proof:returning.proof,businessId:business.id}));
     const resumed = await wa.finishWhatsAppAuth({whatsappLinkToken:returnToken,proof:returning.proof,businessId:finished.business.id});
@@ -182,6 +185,40 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
     await wa.requestWhatsAppCode(expiredOtpToken);
     for (let i=0;i<5;i++) await assert.rejects(wa.verifyWhatsAppCode(expiredOtpToken,"bad"));
     await assert.rejects(wa.verifyWhatsAppCode(expiredOtpToken,sent.at(-1)!.match(/code is (\d{6})/)![1]),/Too many attempts/);
+
+    // A different sender can create and operate a complete workspace without leaving WhatsApp.
+    const directPhone = "15555550200";
+    await inbound("GET STARTED", "direct-start", directPhone);
+    assert.match(sent.at(-1)!, /What is your business called/);
+    await inbound("Direct Market", "direct-name", directPhone);
+    assert.match(sent.at(-1)!, /What email/);
+    await inbound("SKIP", "direct-email", directPhone);
+    assert.match(sent.at(-1)!, /Reply CREATE/);
+    await inbound("CREATE", "direct-create", directPhone);
+    assert.match(sent.at(-1)!, /Direct Market is ready/);
+    const directBusiness = (await query<{id:string}>("SELECT id FROM businesses WHERE name='Direct Market'"))[0]!;
+    assert.ok(directBusiness.id);
+    assert.equal((await query("SELECT user_id FROM whatsapp_auth_identities WHERE phone='+15555550200'")).length,1);
+
+    await inbound("ADD ITEM | Golden Rice | 10 | 45000 | 40000", "direct-stock", directPhone);
+    assert.match(sent.at(-1)!, /Inventory draft/);
+    assert.equal((await query("SELECT id FROM items WHERE business_id=$1",[directBusiness.id])).length,0,"drafts do not mutate inventory");
+    await inbound("CONFIRM", "direct-stock-confirm", directPhone);
+    assert.match(sent.at(-1)!, /Current stock: 10/);
+    assert.equal((await query("SELECT id FROM items WHERE business_id=$1",[directBusiness.id])).length,1);
+
+    await inbound("INVOICE | Kemi | Golden Rice | 2 | 45000", "direct-invoice", directPhone);
+    assert.match(sent.at(-1)!, /Invoice draft/);
+    await inbound("CONFIRM", "direct-invoice-confirm", directPhone);
+    assert.match(sent.at(-1)!, /was created as a draft/);
+    assert.equal((await query("SELECT id FROM invoices WHERE business_id=$1",[directBusiness.id])).length,1);
+
+    await inbound("LOGIN", "direct-login", directPhone);
+    const magicToken = new URLSearchParams(new URL(sent.at(-1)!.match(/https:\/\/\S+/)![0]).hash.slice(1)).get("whatsapp_login")!;
+    const magic = await wa.beginWhatsAppMagicLogin(magicToken);
+    assert.equal(magic.existing,true);
+    const directSession = await wa.finishWhatsAppAuth({whatsappLinkToken:magicToken,proof:magic.proof,businessId:directBusiness.id});
+    assert.equal(directSession.business.id,directBusiness.id);
   } finally {
     globalThis.fetch = originalFetch;
     nodemailer.createTransport = originalTransport;

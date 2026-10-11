@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowRight2, Bank, Card, Copy, Link21, ShieldTick, TickCircle } from "iconsax-react";
+import { ArrowRight2, Bank, Card, Copy, Link21, ShieldTick, TickCircle, Whatsapp } from "iconsax-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { SearchSelection } from "../components/SearchSelection";
@@ -14,7 +14,8 @@ type BankOption = { name:string; code:string };
 type MonnifyConnection = { id:string; status:string; environment:"sandbox"|"production"; external_business_id:string; webhookUrl:string };
 type BankConnection = { id:string; provider:string; status:string; environment:string; external_account_id?:string; last_success_at?:string };
 type TransferAccount = { bank_code:string; bank_name:string; account_number:string; account_name:string; verified_at:string };
-type SettingsTab = "profile"|"integrations";
+type AssistantLink = { linked:boolean; phone:string|null; linkedAt:string|null; activeBusinessName:string|null; linkedToAnotherBusiness:boolean; assistantAvailable:boolean; assistantUrl:string|null };
+type SettingsTab = "profile"|"assistant"|"integrations";
 
 function mask(value?:string, visible=4) {
   if (!value) return "Not available";
@@ -30,7 +31,8 @@ export function SettingsPage() {
   const { notify } = useNotifications();
   const business = session!.business; const token = session!.token;
   const [searchParams,setSearchParams] = useSearchParams();
-  const tab:SettingsTab = searchParams.get("tab") === "integrations" ? "integrations" : "profile";
+  const requestedTab=searchParams.get("tab");
+  const tab:SettingsTab = requestedTab === "integrations" || requestedTab === "assistant" ? requestedTab : "profile";
   const [form,setForm] = useState({ name:business.name, email:business.email??"", phone:business.phone??"", address:business.address??"", countryCode:business.countryCode??"NG", currency:business.currency??"NGN", timezone:business.timezone });
   const [paymentForm,setPaymentForm] = useState({ bankCode:"", accountNumber:"", bvn:"" });
   const [transferForm,setTransferForm] = useState({ bankCode:"", accountNumber:"" });
@@ -40,6 +42,7 @@ export function SettingsPage() {
   const [monnify,setMonnify] = useState<MonnifyConnection|null>(null);
   const [connections,setConnections] = useState<BankConnection[]>([]);
   const [transferAccount,setTransferAccount] = useState<TransferAccount|null>(null);
+  const [assistantLink,setAssistantLink] = useState<AssistantLink|null>(null);
   const [loading,setLoading] = useState(true);
   const [saved,setSaved] = useState(false);
   const [busy,setBusy] = useState(false);
@@ -50,6 +53,8 @@ export function SettingsPage() {
   const [paymentOpen,setPaymentOpen] = useState(false);
   const [transferOpen,setTransferOpen] = useState(false);
   const [disconnectOpen,setDisconnectOpen] = useState(false);
+  const [assistantDisconnectOpen,setAssistantDisconnectOpen] = useState(false);
+  const [assistantBusy,setAssistantBusy] = useState(false);
   const [error,setError] = useState("");
   const [paymentError,setPaymentError] = useState("");
   const [transferError,setTransferError] = useState("");
@@ -64,16 +69,17 @@ export function SettingsPage() {
       api<MonnifyConnection|null>("/payments/monnify/connection",{},token).catch(()=>null),
       api<BankConnection[]>("/integrations/connections",{},token).catch(()=>[]),
       api<TransferAccount|null>("/business/transfer-account",{},token).catch(()=>null),
-    ]).then(([nextAccount,nextBanks,nextMonnify,nextConnections,nextTransferAccount]) => {
+      api<AssistantLink>("/whatsapp/assistant-link",{},token).catch(()=>null),
+    ]).then(([nextAccount,nextBanks,nextMonnify,nextConnections,nextTransferAccount,nextAssistantLink]) => {
       if (!active) return;
-      setAccount(nextAccount); setBanks(nextBanks); setMonnify(nextMonnify); setConnections(nextConnections); setTransferAccount(nextTransferAccount); setLoading(false);
+      setAccount(nextAccount); setBanks(nextBanks); setMonnify(nextMonnify); setConnections(nextConnections); setTransferAccount(nextTransferAccount); setAssistantLink(nextAssistantLink); setLoading(false);
     });
     return () => { active=false; };
   },[token]);
 
   const moniepoint = useMemo(()=>connections.find(row=>row.provider==="moniepoint"&&row.status==="active")??null,[connections]);
   const connectedCount = (monnify?1:0)+(account?.status==="active"?1:0)+(moniepoint?1:0)+(transferAccount?1:0);
-  function selectTab(next:SettingsTab) { setSearchParams(next==="integrations"?{tab:"integrations"}:{}); }
+  function selectTab(next:SettingsTab) { setSearchParams(next==="profile"?{}:{tab:next}); }
 
   async function submit(event:FormEvent) {
     event.preventDefault(); setSaved(false); setError(""); setBusy(true);
@@ -108,10 +114,17 @@ export function SettingsPage() {
     catch (reason) { setMonnifyError(reason instanceof Error?reason.message:"Could not disconnect Monnify"); }
     finally { setMonnifyBusy(false); }
   }
+  async function disconnectAssistant(event:FormEvent) {
+    event.preventDefault(); setAssistantBusy(true);
+    try { await api("/whatsapp/assistant-link",{method:"DELETE"},token); setAssistantLink(current=>current?{...current,linked:false,phone:null,linkedAt:null,activeBusinessName:null}:current); setAssistantDisconnectOpen(false); notify({tone:"success",title:"WhatsApp assistant disconnected"}); }
+    catch (reason) { notify({tone:"error",title:"Could not disconnect WhatsApp",message:reason instanceof Error?reason.message:"Try again shortly."}); }
+    finally { setAssistantBusy(false); }
+  }
 
   return <WorkspaceShell title="Settings" description="Manage your workspace, payment gateways, and connected bank accounts.">
     <div className="settings-tabs" role="tablist" aria-label="Settings sections">
       <button role="tab" aria-selected={tab==="profile"} className={tab==="profile"?"active":""} onClick={()=>selectTab("profile")}>Business profile</button>
+      <button role="tab" aria-selected={tab==="assistant"} className={tab==="assistant"?"active":""} onClick={()=>selectTab("assistant")}>WhatsApp assistant {assistantLink?.linked&&<span>On</span>}</button>
       <button role="tab" aria-selected={tab==="integrations"} className={tab==="integrations"?"active":""} onClick={()=>selectTab("integrations")}>Banks &amp; payments <span>{connectedCount}</span></button>
     </div>
 
@@ -124,6 +137,18 @@ export function SettingsPage() {
       </div>
       <footer className="profile-actions"><div>{error&&<p className="form-error" role="alert">{error}</p>}{!error&&<p>Changes apply to newly generated documents and customer-facing pages.</p>}</div><button className="primary-button primary-button--compact" disabled={busy}>{saved?<><TickCircle size={18}/>Saved</>:busy?"Saving…":"Save changes"}</button></footer>
     </form>}
+
+    {tab==="assistant"&&<div className="integration-settings" role="tabpanel">
+      <section className="integration-overview assistant-overview"><div><span><Whatsapp size={24}/></span><div><p className="section-kicker">LEMON ON WHATSAPP</p><h2>Run everyday business from your chat</h2><p>Create invoices, add stock, record sales and expenses, check today’s figures, or open LemonBooks without remembering a password.</p></div></div>{assistantLink?.linked?<StatusPill tone="connected">Connected</StatusPill>:<StatusPill tone="available">Not connected</StatusPill>}</section>
+      <section className="integration-category"><header><div><h2>Your assistant access</h2><p>This is your private access to Lemon. It is separate from the WhatsApp number customers message.</p></div></header><div className="integration-grid">
+        <article className="integration-card assistant-card"><div className="integration-card__head"><span className="integration-logo integration-logo--whatsapp"><Whatsapp size={23}/></span><div><strong>{assistantLink?.linked?"WhatsApp connected":"Connect your WhatsApp"}</strong><small>{assistantLink?.linked?mask(assistantLink.phone??undefined):"One-time secure connection"}</small></div>{assistantLink?.linked?<StatusPill tone="connected">Active</StatusPill>:<StatusPill tone="available">Available</StatusPill>}</div>
+          {assistantLink?.linked?<><p>Lemon recognizes this WhatsApp number and opens {business.name} automatically. Sensitive records are shown as drafts before they are saved.</p><dl className="integration-details"><div><dt>Workspace</dt><dd>{business.name}</dd></div><div><dt>WhatsApp</dt><dd>{mask(assistantLink.phone??undefined)}</dd></div><div><dt>Portal access</dt><dd>One-time secure link</dd></div></dl></>:assistantLink?.linkedToAnotherBusiness?<><p>Your WhatsApp currently opens {assistantLink.activeBusinessName}. Open Lemon in WhatsApp and send BUSINESSES to switch to this workspace.</p></>:<><p>Open the official Lemon chat and send CONNECT. Lemon will give you a short-lived link that securely connects this signed-in workspace.</p></>}
+          <footer>{assistantLink?.assistantUrl?<a className="primary-button" href={assistantLink.assistantUrl} target="_blank" rel="noreferrer">Open Lemon in WhatsApp <ArrowRight2 size={17}/></a>:<span className="integration-managed"><ShieldTick size={16}/>Add the assistant display number to enable the chat link</span>}{assistantLink?.linked&&<button className="secondary-button" onClick={()=>setAssistantDisconnectOpen(true)}>Disconnect</button>}</footer>
+        </article>
+        <article className="integration-card assistant-card"><div className="integration-card__head"><span className="integration-logo"><ShieldTick size={23}/></span><div><strong>Review before saving</strong><small>Built for safe bookkeeping</small></div></div><p>Lemon never invents missing amounts and does not treat a reported transfer as confirmed money. Every bookkeeping request stays a draft until you reply CONFIRM.</p><div className="assistant-command-list"><span><b>INVOICE</b> Create a customer invoice</span><span><b>ADD ITEM</b> Add or restock inventory</span><span><b>SALE</b> Record a completed sale</span><span><b>EXPENSE</b> Record business spending</span><span><b>TODAY</b> See today’s summary</span><span><b>LOGIN</b> Open your workspace securely</span></div></article>
+      </div></section>
+      <div className="integration-security"><ShieldTick size={20}/><div><strong>Your customer conversations remain private</strong><p>Lemon only receives messages you send to the official assistant. Connecting this access does not read chats from your existing WhatsApp or WhatsApp Business app.</p></div></div>
+    </div>}
 
     {tab==="integrations"&&<div className="integration-settings" role="tabpanel">
       <section className="integration-overview"><div><span><Link21 size={23}/></span><div><p className="section-kicker">FINANCIAL CONNECTIONS</p><h2>Bring payments and banking into one place</h2><p>Activate a payment gateway for invoice checkout or connect a bank feed for automatic reconciliation.</p></div></div><strong>{loading?"Loading…":`${connectedCount} connected`}</strong></section>
@@ -148,5 +173,6 @@ export function SettingsPage() {
     <Modal open={transferOpen} title="Add a transfer account" description="LemonBooks will resolve the account name with the bank before saving it." submitLabel="Verify and save account" busy={transferBusy} onClose={()=>!transferBusy&&setTransferOpen(false)} onSubmit={saveTransferAccount}><div className="form-stack"><SearchSelection label="Receiving bank" value={transferForm.bankCode} onChange={bankCode=>setTransferForm({...transferForm,bankCode})} options={banks.map(bank=>({id:bank.code,title:bank.name,subtitle:`Bank code ${bank.code}`}))} placeholder={banks.length?"Choose bank":"Loading banks…"} searchPlaceholder="Search banks" emptyTitle="No banks match" disabled={!banks.length}/><label>Account number<input inputMode="numeric" maxLength={10} value={transferForm.accountNumber} onChange={e=>setTransferForm({...transferForm,accountNumber:e.target.value.replace(/\D/g,"")})} required/></label>{transferError&&<p className="form-error" role="alert">{transferError}</p>}<div className="secure-form-note"><ShieldTick size={18}/><span><strong>Verified details only</strong><small>The resolved account name will be saved and shown to customers with these transfer instructions.</small></span></div></div></Modal>
 
     <Modal open={disconnectOpen} title="Disconnect Monnify?" description="Online Monnify checkout will stop working for new invoice payments." submitLabel="Disconnect Monnify" busy={monnifyBusy} onClose={()=>!monnifyBusy&&setDisconnectOpen(false)} onSubmit={disconnectMonnify}><div className="disconnect-warning"><strong>Existing payment records will remain in LemonBooks.</strong><p>You can reconnect Monnify later with valid credentials.</p>{monnifyError&&<p className="form-error" role="alert">{monnifyError}</p>}</div></Modal>
+    <Modal open={assistantDisconnectOpen} title="Disconnect WhatsApp assistant?" description="This number will stop opening and managing this LemonBooks workspace." submitLabel="Disconnect WhatsApp" busy={assistantBusy} onClose={()=>!assistantBusy&&setAssistantDisconnectOpen(false)} onSubmit={disconnectAssistant}><div className="disconnect-warning"><strong>Your business records will remain unchanged.</strong><p>You can reconnect securely from the official Lemon WhatsApp chat at any time.</p></div></Modal>
   </WorkspaceShell>;
 }

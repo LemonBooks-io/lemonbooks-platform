@@ -7,7 +7,7 @@ import { createSessionToken } from "../middleware/auth";
 import { emailConfigured, sendCustomerAccessCode } from "./email.service";
 import { completeWhatsAppLink, hashWhatsAppLink } from "./whatsapp-account-link.service";
 
-type SignupInput = { name: string; email: string; password: string; businessName: string; whatsappLinkToken?: string };
+type SignupInput = { name: string; email: string; password?: string; businessName: string; whatsappLinkToken?: string };
 type Challenge = { id: string; tenant_slug: string; expires_at: Date };
 
 function slugify(value: string): string {
@@ -36,9 +36,9 @@ export async function startSignup(input: SignupInput) {
   const name = input.name?.trim();
   const email = input.email?.trim().toLowerCase();
   const businessName = input.businessName?.trim();
-  if (!name || !email || !businessName || !input.password) throw new HttpError(400, "Complete all required fields");
+  if (!name || !email || !businessName) throw new HttpError(400, "Complete all required fields");
   if (!/^\S+@\S+\.\S+$/.test(email)) throw new HttpError(400, "Enter a valid email address");
-  if (input.password.length < 8) throw new HttpError(400, "Password must have at least 8 characters");
+  if (input.password && input.password.length < 8) throw new HttpError(400, "Password must have at least 8 characters");
   if (!emailConfigured()) throw new HttpError(503, "Email delivery is not configured. Add SMTP settings before signing up.", "EMAIL_NOT_CONFIGURED");
 
   const existingUser = await query<{ id: string }>("SELECT id FROM users WHERE lower(email) = $1", [email]);
@@ -51,7 +51,7 @@ export async function startSignup(input: SignupInput) {
   if (occupied.some((row) => row.tenant_slug === tenantSlug)) tenantSlug = `${baseSlug}-${Math.floor(1000 + Math.random() * 9000)}`;
 
   const otp = String(Math.floor(100000 + Math.random() * 900000));
-  const [otpHash, passwordHash] = await Promise.all([bcrypt.hash(otp, 10), bcrypt.hash(input.password, 12)]);
+  const [otpHash, passwordHash] = await Promise.all([bcrypt.hash(otp, 10), input.password ? bcrypt.hash(input.password, 12) : Promise.resolve(null)]);
   await query("DELETE FROM signup_challenges WHERE lower(email) = $1 OR expires_at < now()", [email]);
   const rows = await query<Challenge>(
     `INSERT INTO signup_challenges (email, tenant_slug, payload, otp_hash, expires_at)
@@ -122,6 +122,36 @@ export async function login(emailInput: string, password: string, tenantInput?: 
   const whatsappLink = whatsappLinkToken ? await transaction(client => completeWhatsAppLink(client, hashWhatsAppLink(whatsappLinkToken), row.user_id, row.id)) : undefined;
   const token = createSessionToken({ sub: row.user_id, businessId: row.id, tenantSlug: row.tenant_slug, role: row.role });
   return { token, user: { id: row.user_id, email: row.email, name: row.name, role: row.role }, business: publicBusiness(row), whatsappLink };
+}
+
+export async function startEmailLogin(emailInput: string, tenantInput?: string) {
+  const email=emailInput?.trim().toLowerCase();const tenant=tenantInput?.trim().toLowerCase()||null;
+  if(!email||!/^\S+@\S+\.\S+$/.test(email))throw new HttpError(400,"Enter a valid email address");
+  if(!emailConfigured())throw new HttpError(503,"Email delivery is not configured. Add SMTP settings before signing in.","EMAIL_NOT_CONFIGURED");
+  const rows=await query<Record<string,any>>(`SELECT u.name,b.name AS business_name,b.tenant_slug FROM users u JOIN memberships m ON m.user_id=u.id
+    JOIN businesses b ON b.id=m.business_id WHERE lower(u.email)=$1 AND ($2::text IS NULL OR b.tenant_slug=$2) ORDER BY m.created_at LIMIT 2`,[email,tenant]);
+  if(!rows.length)throw new HttpError(404,"We could not find a LemonBooks account for that email and workspace.");
+  const recent=(await query<{created_at:Date}>("SELECT created_at FROM email_login_challenges WHERE lower(email)=$1 AND created_at>now()-interval '60 seconds' ORDER BY created_at DESC LIMIT 1",[email]))[0];
+  if(recent)throw new HttpError(429,"A sign-in code was sent recently. Wait a minute before requesting another.");
+  const otp=String(Math.floor(100000+Math.random()*900000));const otpHash=await bcrypt.hash(otp,10);
+  const challenge=(await query<{id:string;expires_at:Date}>(`INSERT INTO email_login_challenges(email,tenant_slug,otp_hash,expires_at)
+    VALUES($1,$2,$3,now()+($4||' minutes')::interval) RETURNING id,expires_at`,[email,tenant,otpHash,env.otpTtlMinutes]))[0]!;
+  try{await sendCustomerAccessCode({email,name:rows[0]!.name,businessName:rows[0]!.business_name,otp,purpose:"login"});}
+  catch{await query("DELETE FROM email_login_challenges WHERE id=$1",[challenge.id]);throw new HttpError(502,"We could not send your sign-in code. Please try again shortly.","EMAIL_DELIVERY_FAILED");}
+  return{challengeId:challenge.id,email,expiresAt:challenge.expires_at,needsWorkspace:!tenant&&rows.length>1};
+}
+
+export async function verifyEmailLogin(challengeId:string,otp:string,tenantInput?:string,whatsappLinkToken?:string){
+  const challenge=(await query<Record<string,any>>("SELECT * FROM email_login_challenges WHERE id=$1 AND expires_at>now()",[challengeId]))[0];
+  if(!challenge)throw new HttpError(410,"This sign-in code expired. Request a new one.");
+  if(Number(challenge.attempts)>=5)throw new HttpError(429,"Too many attempts. Request a new sign-in code.");
+  if(!(await bcrypt.compare(String(otp??""),challenge.otp_hash))){await query("UPDATE email_login_challenges SET attempts=attempts+1 WHERE id=$1",[challengeId]);throw new HttpError(400,"That sign-in code is not correct");}
+  const tenant=tenantInput?.trim().toLowerCase()||challenge.tenant_slug||null;
+  const rows=await query<Record<string,any>>(`SELECT u.id AS user_id,u.email,u.name,m.role,b.* FROM users u JOIN memberships m ON m.user_id=u.id
+    JOIN businesses b ON b.id=m.business_id WHERE lower(u.email)=lower($1) AND ($2::text IS NULL OR b.tenant_slug=$2) ORDER BY m.created_at LIMIT 2`,[challenge.email,tenant]);
+  if(!rows.length)throw new HttpError(401,"This account is no longer available.");
+  if(!tenant&&rows.length>1)throw new HttpError(409,"Enter your workspace ID to continue.","TENANT_REQUIRED");
+  return transaction(async client=>{const locked=(await client.query("DELETE FROM email_login_challenges WHERE id=$1 AND expires_at>now() RETURNING id",[challengeId])).rows[0];if(!locked)throw new HttpError(410,"This sign-in code expired or was already used.");const row=rows[0]!;await client.query("UPDATE users SET email_verified_at=COALESCE(email_verified_at,now()),updated_at=now() WHERE id=$1",[row.user_id]);const whatsappLink=whatsappLinkToken?await completeWhatsAppLink(client,hashWhatsAppLink(whatsappLinkToken),row.user_id,row.id):undefined;const token=createSessionToken({sub:row.user_id,businessId:row.id,tenantSlug:row.tenant_slug,role:row.role});return{token,user:{id:row.user_id,email:row.email,name:row.name,role:row.role},business:publicBusiness(row),whatsappLink};});
 }
 
 export { publicBusiness, slugify };

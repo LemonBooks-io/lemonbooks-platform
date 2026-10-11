@@ -1,15 +1,18 @@
 import { Router } from "express";
-import { requestWhatsAppCode, verifyWhatsAppCode, finishWhatsAppAuth } from "../services/whatsapp-auth.service";
+import { beginWhatsAppMagicLogin, requestWhatsAppCode, verifyWhatsAppCode, finishWhatsAppAuth } from "../services/whatsapp-auth.service";
 import { asyncRoute } from "../http";
 import * as auth from "../services/auth.service";
 import { authenticate } from "../middleware/auth";
 import { transaction } from "../database/pool";
 import { completeWhatsAppLink, hashWhatsAppLink } from "../services/whatsapp-account-link.service";
+import { env } from "../config";
 
 export const authRouter = Router();
+authRouter.get("/whatsapp/entry",(_req,res)=>{const number=env.whatsapp.platformDisplayNumber;res.json({success:true,data:{available:Boolean(number),signInUrl:number?`https://wa.me/${number}?text=LOGIN`:null,signUpUrl:number?`https://wa.me/${number}?text=${encodeURIComponent("GET STARTED")}`:null}});});
 authRouter.post("/whatsapp/code", asyncRoute(async (req,res) => { res.json({success:true,data:await requestWhatsAppCode(req.body.whatsappLinkToken)}); }));
 authRouter.post("/whatsapp/verify", asyncRoute(async (req,res) => { res.json({success:true,data:await verifyWhatsAppCode(req.body.whatsappLinkToken,req.body.otp)}); }));
 authRouter.post("/whatsapp/finish", asyncRoute(async (req,res) => { res.json({success:true,data:await finishWhatsAppAuth(req.body)}); }));
+authRouter.post("/whatsapp/magic", asyncRoute(async (req,res) => { res.json({success:true,data:await beginWhatsAppMagicLogin(req.body.whatsappLoginToken)}); }));
 
 authRouter.post("/signup", asyncRoute(async (req, res) => {
   const result = await auth.startSignup(req.body);
@@ -25,6 +28,8 @@ authRouter.post("/login", asyncRoute(async (req, res) => {
   const result = await auth.login(req.body.email, req.body.password, req.body.tenantSlug, req.body.whatsappLinkToken);
   res.json({ success: true, message: "Welcome back", data: result });
 }));
+authRouter.post("/email/code",asyncRoute(async(req,res)=>{res.json({success:true,message:"Sign-in code sent",data:await auth.startEmailLogin(req.body.email,req.body.tenantSlug)});}));
+authRouter.post("/email/verify",asyncRoute(async(req,res)=>{res.json({success:true,message:"Welcome back",data:await auth.verifyEmailLogin(req.body.challengeId,req.body.otp,req.body.tenantSlug,req.body.whatsappLinkToken)});}));
 
 authRouter.post("/whatsapp-link", authenticate, asyncRoute(async (req, res) => {
   const result = await transaction(client => completeWhatsAppLink(client,

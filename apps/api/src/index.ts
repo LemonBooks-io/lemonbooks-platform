@@ -6,11 +6,13 @@ import { pool } from "./database/pool";
 import { createApp } from "./app";
 import { startIntegrationWorker } from "./services/integration.service";
 import { provisionWhatsAppPlatformConnection } from "./services/whatsapp-platform.service";
+import { startMartWorker } from "./services/mart.service";
 
 async function start() {
   await migrate();
   await provisionWhatsAppPlatformConnection();
   startIntegrationWorker();
+  startMartWorker();
   const server = createApp().listen(env.port, () => {
     console.log(`LemonBooks API listening at http://localhost:${env.port}`);
     console.log("Database: PostgreSQL");

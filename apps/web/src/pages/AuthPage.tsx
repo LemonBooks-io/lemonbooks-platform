@@ -1,115 +1,38 @@
-import { FormEvent, useState } from "react";
-import { ArrowLeft2, ArrowRight2, Building4, Eye, EyeSlash, Lock1, TickCircle } from "iconsax-react";
-import { post } from "../lib/api";
+import { FormEvent, useEffect, useState } from "react";
+import { ArrowLeft2, ArrowRight2, Building4, Lock1, TickCircle, Whatsapp } from "iconsax-react";
+import { api, post } from "../lib/api";
 import type { Session } from "../lib/types";
 import { useSession } from "../context/SessionContext";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
-type Mode = "login" | "signup" | "verify";
-type Challenge = { challengeId: string; tenantSlug: string; email: string; expiresAt: string; devOtp?: string };
-type AuthResult = Session & { whatsappLink?: { status: "linked" | "unavailable"; message: string } };
+type Mode = "signin" | "signup" | "verify-signin" | "verify-signup";
+type Challenge = { challengeId:string; tenantSlug?:string; email:string; expiresAt:string; devOtp?:string; needsWorkspace?:boolean };
+type AuthResult = Session & { whatsappLink?: { status:"linked"|"unavailable"; message:string } };
+type WhatsAppEntry = { available:boolean; signInUrl:string|null; signUpUrl:string|null };
 
-export function AuthPage() {
-  const { setSession } = useSession();
-  const navigate = useNavigate();
-  const [whatsappLinkToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get("whatsapp_link") ?? undefined);
-  const [linkConsent, setLinkConsent] = useState(false);
-  const [completed, setCompleted] = useState<AuthResult | null>(null);
-  const [mode, setMode] = useState<Mode>(() => new URLSearchParams(window.location.search).get("mode") === "signup" ? "signup" : "login");
-  const [form, setForm] = useState({ name: "", email: "", password: "", businessName: "", tenantSlug: "", otp: "" });
-  const [challenge, setChallenge] = useState<Challenge | null>(null);
-  const [showPassword, setShowPassword] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  function update(field: keyof typeof form, value: string) { setForm((current) => ({ ...current, [field]: value })); setError(""); }
-
-  function finish(session: AuthResult) {
-    navigate("/", { replace: true });
-    const { whatsappLink: _link, ...accountSession } = session;
-    setSession(accountSession);
-  }
-
-  async function submit(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setError("");
-    try {
-      if (mode === "login") {
-        const session = await post<AuthResult>("/auth/login", { email: form.email, password: form.password, tenantSlug: form.tenantSlug || undefined, whatsappLinkToken: linkConsent ? whatsappLinkToken : undefined });
-        if (session.whatsappLink) setCompleted(session); else finish(session);
-      } else if (mode === "signup") {
-        const next = await post<Challenge>("/auth/signup", { name: form.name, email: form.email, password: form.password, businessName: form.businessName, whatsappLinkToken: linkConsent ? whatsappLinkToken : undefined });
-        setChallenge(next); setMode("verify");
-      } else if (challenge) {
-        const session = await post<AuthResult>("/auth/signup/verify", { challengeId: challenge.challengeId, otp: form.otp });
-        if (session.whatsappLink) setCompleted(session); else finish(session);
-      }
-    } catch (err) { setError(err instanceof Error ? err.message : "Something went wrong"); }
-    finally { setBusy(false); }
-  }
-
-  const signup = mode === "signup";
-  if (completed) return <main className="auth-form-wrap" style={{ minHeight: "100vh" }}><section className="auth-form-card">
-    <div className="auth-icon"><TickCircle size={25} /></div>
-    <h1>{completed.whatsappLink?.status === "linked" ? "Your WhatsApp is connected" : "Your account is ready"}</h1>
-    <p role="status">{completed.whatsappLink?.message}</p>
-    <button className="primary-button" onClick={() => finish(completed)}>Continue to workspace <ArrowRight2 size={18} /></button>
-  </section></main>;
-  return (
-    <main className="auth-page">
-      <section className="auth-story">
-        <a className="brand brand--light" href="/" aria-label="LemonBooks home"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><span>LemonBooks</span></a>
-        <div className="auth-story__content">
-          <p className="eyebrow eyebrow--light">BUILT FOR HOW BUSINESS REALLY HAPPENS</p>
-          <h1>Every payment.<br />One clear picture.</h1>
-          <p>Bring cash, transfers, POS sales, invoices, inventory, and expenses together—even when connectivity is unreliable.</p>
-          <div className="auth-benefits">
-            <span><TickCircle size={20} /> One workspace for every payment rail</span>
-            <span><TickCircle size={20} /> Simple books without accounting jargon</span>
-            <span><TickCircle size={20} /> Offline-ready architecture for mobile</span>
-          </div>
-        </div>
-        <p className="auth-story__foot">Know what came in, what went out, and what comes next.</p>
-      </section>
-
-      <section className="auth-form-wrap">
-        <div className="auth-form-card">
-          {mode === "verify" ? (
-            <>
-              <button className="text-button back-button" onClick={() => { setMode("signup"); setForm((f) => ({ ...f, otp: "" })); }}><ArrowLeft2 size={18} /> Change details</button>
-              <div className="auth-icon"><Lock1 size={25} /></div>
-              <p className="eyebrow">SECURE SIGN UP</p>
-              <h2>Verify your email</h2>
-              <p className="muted">We sent a 6-digit code to <strong>{challenge?.email}</strong>.</p>
-              <div className="tenant-preview"><Building4 size={20} /><span>Your workspace</span><strong>{challenge?.tenantSlug}.lemonbooks.app</strong></div>
-              {challenge?.devOtp && <div className="dev-code"><span>Development code</span><strong>{challenge.devOtp}</strong></div>}
-              <form onSubmit={submit}>
-                <label>Verification code<input autoFocus className="otp-input" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={form.otp} onChange={(e) => update("otp", e.target.value.replace(/\D/g, ""))} placeholder="000000" /></label>
-                {error && <p className="form-error">{error}</p>}
-                <button className="primary-button" disabled={busy || form.otp.length !== 6}>{busy ? "Creating your workspace…" : <>Verify and create business <ArrowRight2 size={18} /></>}</button>
-              </form>
-            </>
-          ) : (
-            <>
-              <div className="mobile-brand"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><strong>LemonBooks</strong></div>
-              <p className="eyebrow">{signup ? "START YOUR BUSINESS WORKSPACE" : "WELCOME BACK"}</p>
-              <h2>{signup ? "Create your business account" : "Sign in to LemonBooks"}</h2>
-              <p className="muted">{signup ? "No administrator needed. Your workspace is created as soon as you verify your email." : "Continue to your business workspace."}</p>
-              <div className="auth-switch"><button className={!signup ? "active" : ""} onClick={() => setMode("login")}>Sign in</button><button className={signup ? "active" : ""} onClick={() => setMode("signup")}>Create account</button></div>
-              <form onSubmit={submit} className="form-stack">
-                {whatsappLinkToken && <label><span><input type="checkbox" style={{ width: "auto", minHeight: "auto", marginRight: 8 }} checked={linkConsent} onChange={e => setLinkConsent(e.target.checked)} required /> Connect the WhatsApp number that received this private link to my workspace.</span><small>Only continue if you requested this link in your own WhatsApp chat. We’ll confirm the connection there after you finish.</small></label>}
-                {signup && <label>Your name<input value={form.name} onChange={(e) => update("name", e.target.value)} placeholder="Ada Okafor" autoComplete="name" required /></label>}
-                {signup && <label>Business name<input value={form.businessName} onChange={(e) => update("businessName", e.target.value)} placeholder="Ada's Market" required /><small>This becomes your unique workspace ID.</small></label>}
-                <label>Email address<input type="email" value={form.email} onChange={(e) => update("email", e.target.value)} placeholder="you@business.com" autoComplete="email" required /></label>
-                {!signup && <label>Workspace ID <span className="optional">Optional</span><div className="input-suffix"><input value={form.tenantSlug} onChange={(e) => update("tenantSlug", e.target.value.toLowerCase())} placeholder="adas-market" /><span>.lemonbooks.app</span></div></label>}
-                <label>Password<div className="password-input"><input type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => update("password", e.target.value)} placeholder={signup ? "At least 8 characters" : "Your password"} autoComplete={signup ? "new-password" : "current-password"} minLength={8} required /><button type="button" onClick={() => setShowPassword((v) => !v)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeSlash size={19} /> : <Eye size={19} />}</button></div></label>
-                {error && <p className="form-error">{error}</p>}
-                <button className="primary-button" disabled={busy}>{busy ? "Please wait…" : <>{signup ? "Continue to verification" : "Sign in"}<ArrowRight2 size={18} /></>}</button>
-              </form>
-              {signup && <p className="legal">By continuing, you agree to the LemonBooks <a href="/terms" target="_blank" rel="noreferrer">Terms of Service</a> and acknowledge the <a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.</p>}
-            </>
-          )}
-        </div>
-      </section>
-    </main>
-  );
+export function AuthPage(){
+  const {setSession}=useSession();const navigate=useNavigate();const location=useLocation();
+  const initialMode=new URLSearchParams(location.search).get("mode")==="signup"?"signup":"signin";
+  const [mode,setMode]=useState<Mode>(initialMode);const [challenge,setChallenge]=useState<Challenge|null>(null);
+  const [form,setForm]=useState({name:"",email:"",businessName:"",tenantSlug:"",otp:""});
+  const [busy,setBusy]=useState(false);const [error,setError]=useState("");const [completed,setCompleted]=useState<AuthResult|null>(null);
+  const [whatsappEntry,setWhatsAppEntry]=useState<WhatsAppEntry|null>(null);
+  const whatsappLinkToken=new URLSearchParams(location.hash.slice(1)).get("whatsapp_link")??undefined;
+  const [linkConsent,setLinkConsent]=useState(false);
+  useEffect(()=>{void api<WhatsAppEntry>("/auth/whatsapp/entry").then(setWhatsAppEntry).catch(()=>setWhatsAppEntry(null));},[]);
+  useEffect(()=>{const next=new URLSearchParams(location.search).get("mode")==="signup"?"signup":"signin";setMode(current=>current.startsWith("verify-")?current:next);},[location.search]);
+  function update(field:keyof typeof form,value:string){setForm(current=>({...current,[field]:value}));setError("");}
+  function choose(next:"signin"|"signup"){setMode(next);setChallenge(null);setError("");setForm(current=>({...current,otp:""}));navigate(`/auth?mode=${next}${location.hash}`,{replace:true});}
+  function finish(result:AuthResult){const{whatsappLink:_link,...session}=result;setSession(session);navigate("/",{replace:true});}
+  async function submit(event:FormEvent){event.preventDefault();setBusy(true);setError("");try{
+    if(mode==="signin"){const next=await post<Challenge>("/auth/email/code",{email:form.email});setChallenge(next);setMode("verify-signin");}
+    else if(mode==="signup"){const next=await post<Challenge>("/auth/signup",{name:form.name,email:form.email,businessName:form.businessName,whatsappLinkToken:linkConsent?whatsappLinkToken:undefined});setChallenge(next);setMode("verify-signup");}
+    else if(mode==="verify-signup"&&challenge){const result=await post<AuthResult>("/auth/signup/verify",{challengeId:challenge.challengeId,otp:form.otp});result.whatsappLink?setCompleted(result):finish(result);}
+    else if(mode==="verify-signin"&&challenge){const result=await post<AuthResult>("/auth/email/verify",{challengeId:challenge.challengeId,otp:form.otp,tenantSlug:form.tenantSlug||undefined,whatsappLinkToken:linkConsent?whatsappLinkToken:undefined});result.whatsappLink?setCompleted(result):finish(result);}
+  }catch(reason){setError(reason instanceof Error?reason.message:"Something went wrong");}finally{setBusy(false);}}
+  if(completed)return <main className="auth-form-wrap" style={{minHeight:"100vh"}}><section className="auth-form-card"><div className="auth-icon"><TickCircle size={25}/></div><h1>{completed.whatsappLink?.status==="linked"?"Your WhatsApp is connected":"Your account is ready"}</h1><p role="status">{completed.whatsappLink?.message}</p><button className="primary-button" onClick={()=>finish(completed)}>Continue to workspace <ArrowRight2 size={18}/></button></section></main>;
+  const signup=mode==="signup"||mode==="verify-signup";const verify=mode.startsWith("verify-");const whatsAppUrl=signup?whatsappEntry?.signUpUrl:whatsappEntry?.signInUrl;const whatsappAvailable=Boolean(whatsappEntry?.available&&whatsAppUrl);
+  return <main className="auth-page"><section className="auth-story"><a className="brand brand--light" href="/" aria-label="LemonBooks home"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><span>LemonBooks</span></a><div className="auth-story__content"><p className="eyebrow eyebrow--light">BUILT FOR HOW BUSINESS REALLY HAPPENS</p><h1>Every payment.<br/>One clear picture.</h1><p>Bring cash, transfers, POS sales, invoices, inventory, and expenses together—even when connectivity is unreliable.</p><div className="auth-benefits"><span><TickCircle size={20}/> One workspace for every payment rail</span><span><TickCircle size={20}/> Simple books without accounting jargon</span><span><TickCircle size={20}/> Run everyday work from WhatsApp</span></div></div><p className="auth-story__foot">Know what came in, what went out, and what comes next.</p></section>
+    <section className="auth-form-wrap"><div className="auth-form-card">{verify?<><button className="text-button back-button" onClick={()=>choose(signup?"signup":"signin")}><ArrowLeft2 size={18}/> Change details</button><div className="auth-icon"><Lock1 size={25}/></div><p className="eyebrow">SECURE {signup?"SIGN UP":"SIGN IN"}</p><h2>Check your email</h2><p className="muted">We sent a 6-digit code to <strong>{challenge?.email}</strong>. It expires shortly and works once.</p>{signup&&challenge?.tenantSlug&&<div className="tenant-preview"><Building4 size={20}/><span>Your workspace</span><strong>{challenge.tenantSlug}.lemonbooks.app</strong></div>}{challenge?.devOtp&&<div className="dev-code"><span>Development code</span><strong>{challenge.devOtp}</strong></div>}<form onSubmit={submit} className="form-stack"><label>Verification code<input autoFocus className="otp-input" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={form.otp} onChange={event=>update("otp",event.target.value.replace(/\D/g,""))} placeholder="000000"/></label>{mode==="verify-signin"&&challenge?.needsWorkspace&&<label>Workspace ID<div className="input-suffix"><input value={form.tenantSlug} onChange={event=>update("tenantSlug",event.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""))} placeholder="your-business" required/><span>.lemonbooks.app</span></div><small>This email belongs to more than one business.</small></label>}{error&&<p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy||form.otp.length!==6||(Boolean(challenge?.needsWorkspace)&&!form.tenantSlug)}>{busy?"Checking…":<>{signup?"Verify and create business":"Verify and sign in"}<ArrowRight2 size={18}/></>}</button></form></>:<><div className="mobile-brand"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><strong>LemonBooks</strong></div><p className="eyebrow">{signup?"START YOUR BUSINESS WORKSPACE":"WELCOME BACK"}</p><h2>{signup?"Create your business account":"Sign in to LemonBooks"}</h2><p className="muted">{whatsappAvailable?(signup?"Start with WhatsApp or email. No password to create or remember.":"Use WhatsApp or a one-time code sent to your email."):(signup?"Create your workspace with email. You can connect WhatsApp afterward.":"We’ll send a one-time sign-in code to your email.")}</p><div className="auth-switch"><button className={!signup?"active":""} onClick={()=>choose("signin")}>Sign in</button><button className={signup?"active":""} onClick={()=>choose("signup")}>Create account</button></div>{whatsappAvailable&&<><a className="whatsapp-auth-button" href={whatsAppUrl!} target="_blank" rel="noreferrer"><Whatsapp size={20}/>{signup?"Create account with WhatsApp":"Continue with WhatsApp"}</a><div className="auth-divider"><span>or use email</span></div></>}
+      <form onSubmit={submit} className="form-stack">{whatsappLinkToken&&<label className="consent-check"><span><input type="checkbox" checked={linkConsent} onChange={event=>setLinkConsent(event.target.checked)} required/> Connect the WhatsApp number that requested this private link.</span><small>Continue only if you opened this link from your own Lemon chat.</small></label>}{signup&&<label>Your name<input value={form.name} onChange={event=>update("name",event.target.value)} placeholder="Ada Okafor" autoComplete="name" required/></label>}{signup&&<label>Business name<input value={form.businessName} onChange={event=>update("businessName",event.target.value)} placeholder="Ada's Market" required/><small>This becomes your unique workspace ID.</small></label>}<label>Email address<input type="email" value={form.email} onChange={event=>update("email",event.target.value)} placeholder="you@business.com" autoComplete="email" required/></label>{error&&<p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy}>{busy?"Sending code…":<>Continue with email <ArrowRight2 size={18}/></>}</button></form>{signup&&<p className="legal">By continuing, you agree to the LemonBooks <a href="/terms" target="_blank" rel="noreferrer">Terms of Service</a> and acknowledge the <a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.</p>}</>}</div></section></main>;
 }

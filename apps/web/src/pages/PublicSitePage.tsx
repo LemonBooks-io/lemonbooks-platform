@@ -12,7 +12,7 @@ export function PublicSitePage() {
     <header className="site-nav">
       <a className="brand" href="/" aria-label="LemonBooks home"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><span>LemonBooks</span></a>
       <nav aria-label="Main navigation"><a href="#product">Product</a><a href="#how-it-works">How it works</a><a href="#security">Security</a></nav>
-      <div><a className="site-link" href="/login">Sign in</a><a className="site-button site-button--small" href="/login?mode=signup">Get started <ArrowRight2 size={17}/></a></div>
+      <div><a className="site-link" href="/auth?mode=signin">Sign in</a><a className="site-button site-button--small" href="/auth?mode=signup">Get started <ArrowRight2 size={17}/></a></div>
     </header>
 
     <section className="site-hero">
@@ -20,7 +20,7 @@ export function PublicSitePage() {
         <span className="site-pill"><span/> Built for businesses moving every day</span>
         <h1>Run the business.<br/><em>See the whole picture.</em></h1>
         <p>LemonBooks connects invoices, payments, inventory, reconciliation, and customer conversations in one calm workspace—designed for how business really happens.</p>
-        <div className="site-actions"><a className="site-button" href="/login?mode=signup">Create your workspace <ArrowRight2 size={19}/></a><a className="site-text-link" href="#product">Explore LemonBooks</a></div>
+        <div className="site-actions"><a className="site-button" href="/auth?mode=signup">Create your workspace <ArrowRight2 size={19}/></a><a className="site-text-link" href="#product">Explore LemonBooks</a></div>
         <div className="site-proof"><span><TickCircle size={18}/> Clear setup</span><span><TickCircle size={18}/> Multi-channel payments</span><span><TickCircle size={18}/> Built for growing teams</span></div>
       </div>
       <div className="site-hero__visual" aria-label="LemonBooks business overview preview">
@@ -39,18 +39,18 @@ export function PublicSitePage() {
 
     <section className="site-section" id="product">
       <div className="site-section__intro"><p className="site-kicker">THE BUSINESS SYSTEM OF RECORD</p><h2>Less fragmentation.<br/>More confident decisions.</h2><p>Every workflow is designed to remove uncertainty without adding accounting complexity.</p></div>
-      <div className="site-capability-grid">{capabilities.map(({ icon: Icon, title, copy }, index) => <article key={title}><span>{String(index + 1).padStart(2, "0")}</span><div className="site-capability-icon"><Icon size={24}/></div><h3>{title}</h3><p>{copy}</p><a href="/login?mode=signup">Set up your workspace <ArrowRight2 size={16}/></a></article>)}</div>
+      <div className="site-capability-grid">{capabilities.map(({ icon: Icon, title, copy }, index) => <article key={title}><span>{String(index + 1).padStart(2, "0")}</span><div className="site-capability-icon"><Icon size={24}/></div><h3>{title}</h3><p>{copy}</p><a href="/auth?mode=signup">Set up your workspace <ArrowRight2 size={16}/></a></article>)}</div>
     </section>
 
     <section className="site-workflow" id="how-it-works">
-      <div><p className="site-kicker">FROM ACTIVITY TO CLARITY</p><h2>Your operations stay connected.</h2><p>A sale should not create five separate admin tasks. LemonBooks keeps the customer, invoice, payment, stock movement, and reconciliation trail together.</p><a className="site-button site-button--light" href="/login?mode=signup">Start with LemonBooks <ArrowRight2 size={18}/></a></div>
+      <div><p className="site-kicker">FROM ACTIVITY TO CLARITY</p><h2>Your operations stay connected.</h2><p>A sale should not create five separate admin tasks. LemonBooks keeps the customer, invoice, payment, stock movement, and reconciliation trail together.</p><a className="site-button site-button--light" href="/auth?mode=signup">Start with LemonBooks <ArrowRight2 size={18}/></a></div>
       <ol><li><span>1</span><div><strong>Capture</strong><p>Create an invoice or receive an order from the channel your customer already uses.</p></div></li><li><span>2</span><div><strong>Collect</strong><p>Offer connected payment methods and retain a clear trail for cash and transfers.</p></div></li><li><span>3</span><div><strong>Reconcile</strong><p>Match activity, surface exceptions, and keep balances dependable.</p></div></li><li><span>4</span><div><strong>Act</strong><p>See what is due, what needs restocking, and what deserves attention next.</p></div></li></ol>
     </section>
 
     <section className="site-trust" id="security"><div className="site-trust__icon"><ShieldTick size={32}/></div><div><p className="site-kicker">SECURITY BY DESIGN</p><h2>Your financial operations deserve careful infrastructure.</h2></div><div className="site-trust__points"><span><strong>Protected credentials</strong><small>Sensitive integration credentials are encrypted and never exposed in the interface.</small></span><span><strong>Controlled access</strong><small>Workspace access, tenant boundaries, and auditable activity protect business information.</small></span><span><strong>You stay in control</strong><small>Clear privacy and deletion processes support responsible handling of account data.</small></span></div></section>
 
-    <section className="site-cta"><p className="site-kicker">A CLEARER BUSINESS STARTS HERE</p><h2>Bring every moving part<br/>into one dependable view.</h2><p>Set up your LemonBooks workspace and build a cleaner operating rhythm from day one.</p><a className="site-button" href="/login?mode=signup">Create your workspace <ArrowRight2 size={19}/></a></section>
+    <section className="site-cta"><p className="site-kicker">A CLEARER BUSINESS STARTS HERE</p><h2>Bring every moving part<br/>into one dependable view.</h2><p>Set up your LemonBooks workspace and build a cleaner operating rhythm from day one.</p><a className="site-button" href="/auth?mode=signup">Create your workspace <ArrowRight2 size={19}/></a></section>
 
-    <footer className="site-footer"><div><a className="brand brand--light" href="/"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><span>LemonBooks</span></a><p>Financial operations and reconciliation for ambitious businesses.</p></div><div><strong>Product</strong><a href="#product">Capabilities</a><a href="#how-it-works">How it works</a><a href="/login">Sign in</a></div><div><strong>Legal</strong><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a><a href="/data-deletion">Data deletion</a></div><div><strong>Support</strong><a href="mailto:support@lemonbooks.io">Contact support</a><a href="mailto:privacy@lemonbooks.io">Privacy contact</a></div><small>© 2026 LemonBooks. All rights reserved.</small></footer>
+    <footer className="site-footer"><div><a className="brand brand--light" href="/"><img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt=""/><span>LemonBooks</span></a><p>Financial operations and reconciliation for ambitious businesses.</p></div><div><strong>Product</strong><a href="#product">Capabilities</a><a href="#how-it-works">How it works</a><a href="/auth?mode=signin">Sign in</a></div><div><strong>Legal</strong><a href="/privacy">Privacy policy</a><a href="/terms">Terms of service</a><a href="/data-deletion">Data deletion</a></div><div><strong>Support</strong><a href="mailto:support@lemonbooks.io">Contact support</a><a href="mailto:privacy@lemonbooks.io">Privacy contact</a></div><small>© 2026 LemonBooks. All rights reserved.</small></footer>
   </main>;
 }

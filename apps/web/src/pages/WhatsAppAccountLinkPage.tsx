@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
 import { post } from "../lib/api";
+import { ArrowRight2, Link21, TickCircle, Whatsapp } from "iconsax-react";
+import { WhatsAppAccessShell } from "../components/WhatsAppAccessShell";
 
 export function WhatsAppAccountLinkPage() {
   const { session, signOut } = useSession();
@@ -18,16 +20,15 @@ export function WhatsAppAccountLinkPage() {
     } catch (e) { setError(e instanceof Error ? e.message : "Could not connect WhatsApp"); }
     finally { setBusy(false); }
   }
-  return <main className="auth-form-wrap" style={{ minHeight: "100vh" }}><section className="auth-form-card">
-    <img className="brand-mark" src="/brand/lemonbooks-logo-mark.png" alt="LemonBooks" />
-    <h1>{result?.status === "linked" ? "WhatsApp connected" : "Connect your WhatsApp"}</h1>
-    {result ? <p role="status">{result.message}</p> : <>
-      <p>Connect the WhatsApp number that received this link to <strong>{session?.business.name}</strong>.</p>
-      <p className="muted">Continue only if you requested this private link from your own WhatsApp chat. A confirmation will be sent there.</p>
-      <button className="primary-button" onClick={connect} disabled={busy}>{busy ? "Connecting…" : "Connect to this workspace"}</button>
-      <button className="text-button" disabled={busy} onClick={signOut}>Sign in to a different account</button>
-    </>}
-    {error && <p className="form-error" role="alert">{error}</p>}
-    <button className="text-button" disabled={busy} onClick={() => navigate("/", { replace: true })}>{result ? "Continue to workspace" : "Cancel"}</button>
-  </section></main>;
+  const connected=result?.status==="linked";
+  return <WhatsAppAccessShell><div className="whatsapp-access-heading">
+    <span className={`whatsapp-access-icon ${connected?"is-success":""}`}>{connected?<TickCircle size={26}/>:<Link21 size={25}/>}</span>
+    <p className="eyebrow">WHATSAPP · WORKSPACE ACCESS</p>
+    <h1>{connected?"WhatsApp connected":"Connect your WhatsApp"}</h1>
+    <p>{connected?result.message:<>Link the WhatsApp number that requested this private link to <strong>{session?.business.name}</strong>.</>}</p>
+  </div>
+  {!result&&<><div className="whatsapp-link-summary"><span><Whatsapp size={21}/></span><div><small>Workspace</small><strong>{session?.business.name}</strong></div><i/><div><small>Access</small><strong>WhatsApp assistant</strong></div></div><div className="whatsapp-access-note">Only continue if you requested this link from your own LemonBooks WhatsApp chat. We’ll confirm the connection there.</div><div className="whatsapp-access-actions"><button className="primary-button" onClick={connect} disabled={busy}>{busy?"Connecting…":<>Connect to workspace <ArrowRight2 size={18}/></>}</button><button className="secondary-button" disabled={busy} onClick={signOut}>Use a different account</button></div></>}
+  {error&&<p className="form-error" role="alert">{error}</p>}
+  <button className="whatsapp-access-cancel" disabled={busy} onClick={()=>navigate("/",{replace:true})}>{result?"Continue to workspace":"Cancel"}</button>
+  </WhatsAppAccessShell>;
 }

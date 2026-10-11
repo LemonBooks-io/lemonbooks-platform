@@ -29,7 +29,7 @@ export async function sendCustomerAccessCode(input: {
   name: string;
   businessName: string;
   otp: string;
-  purpose: "activate" | "login" | "business_signup";
+  purpose: "activate" | "login" | "business_signup" | "mart_connect";
 }) {
   if (!emailConfigured())
     throw new HttpError(
@@ -38,7 +38,9 @@ export async function sendCustomerAccessCode(input: {
       "EMAIL_NOT_CONFIGURED",
     );
   const action =
-    input.purpose === "business_signup"
+    input.purpose === "mart_connect"
+      ? "approve connecting your inventory to Oynk Mart"
+      : input.purpose === "business_signup"
       ? "create your business workspace"
       : input.purpose === "activate"
       ? "create your customer account"

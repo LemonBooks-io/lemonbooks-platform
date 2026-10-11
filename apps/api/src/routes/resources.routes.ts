@@ -1,4 +1,5 @@
-import { Router } from "express";
+import express, { Router } from "express";
+import { maxPhotoBytes, photoReferences, publicationChoice, readItemPhoto, saveItemPhoto, verifyItemPhotos } from "../services/item-media.service";
 import { query, transaction } from "../database/pool";
 import { asyncRoute, HttpError } from "../http";
 import { sendInvoiceEmail } from "../services/email.service";
@@ -10,6 +11,16 @@ function table(name: string): string {
   if (!allowed.has(name)) throw new HttpError(404, "Resource not found");
   return name;
 }
+
+resourcesRouter.post('/item-images',(req,res,next)=>express.raw({type:['image/jpeg','image/png','image/webp'],limit:maxPhotoBytes})(req,res,error=>next(error?new HttpError(413,'Choose a photo up to 5 MB.'):undefined)),asyncRoute(async(req,res)=>{
+ if(!Buffer.isBuffer(req.body))throw new HttpError(400,'Choose a JPG, PNG or WebP photo.');
+ const photo=await saveItemPhoto(req.auth!.businessId,req.body,String(req.header('content-type')??'').split(';')[0]!);
+ res.status(201).json({success:true,data:photo});
+}));
+resourcesRouter.get('/item-images/:id',asyncRoute(async(req,res)=>{
+ const photo=await readItemPhoto(req.auth!.businessId,String(req.params.id));
+ res.setHeader('Cache-Control','private,no-store');res.type('image/webp');res.setHeader('X-Content-Type-Options','nosniff');res.send(photo.content);
+}));
 
 resourcesRouter.get("/:resource", asyncRoute(async (req, res) => {
   const requestedResource = req.params.resource;
@@ -84,10 +95,14 @@ resourcesRouter.post("/items", asyncRoute(async (req, res) => {
   if (!name?.trim()) throw new HttpError(400, "Item name is required");
   if (!["product", "service"].includes(kind)) throw new HttpError(400, "Type must be product or service");
   if (!Number.isFinite(Number(price)) || Number(price) < 0) throw new HttpError(400, "Selling price must be a positive number");
+  const manager=['owner','admin'].includes(req.auth!.role);
+  const published=publicationChoice(req.body.published??req.body.publishToMart,manager);
+  if(published&&!manager)throw new HttpError(403,'Only a workspace owner or admin can publish to Oynk Mart.');
+  const imageUrls=photoReferences(req.body.imageUrls)??[];await verifyItemPhotos(req.auth!.businessId,imageUrls);
   const [record] = await query<Record<string, unknown>>(
-    `INSERT INTO items (business_id,name,description,kind,sku,price,cost,stock_quantity,low_stock_threshold)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-    [req.auth!.businessId, name.trim(), description || null, kind, sku || null, price, cost, stockQuantity ?? null, lowStockThreshold ?? null],
+    `INSERT INTO items (business_id,name,description,kind,sku,price,cost,stock_quantity,low_stock_threshold,mart_published,image_urls)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb) RETURNING *`,
+    [req.auth!.businessId, name.trim(), description || null, kind, sku || null, price, cost, stockQuantity ?? null, lowStockThreshold ?? null,published,JSON.stringify(imageUrls)],
   );
   await query("INSERT INTO sync_changes (business_id,table_name,record_id,operation) VALUES ($1,'items',$2,'created')", [req.auth!.businessId, record!.id]);
   res.status(201).json({ success: true, data: record });
@@ -97,11 +112,14 @@ resourcesRouter.patch("/items/:id", asyncRoute(async (req, res) => {
   const { name, description, kind = "product", sku, price = 0, cost = 0, stockQuantity, lowStockThreshold, active = true } = req.body;
   if (!name?.trim()) throw new HttpError(400, "Item name is required");
   if (!["product", "service"].includes(kind)) throw new HttpError(400, "Type must be product or service");
+  const published=req.body.published===undefined&&req.body.publishToMart===undefined?null:publicationChoice(req.body.published??req.body.publishToMart);
+  if(published!==null&&!['owner','admin'].includes(req.auth!.role)){const [prior]=await query<{mart_published:boolean}>('SELECT mart_published FROM items WHERE id=$1 AND business_id=$2',[req.params.id,req.auth!.businessId]);if(prior?.mart_published!==published)throw new HttpError(403,'Only a workspace owner or admin can change Mart visibility.');}
+  const imageUrls=photoReferences(req.body.imageUrls);await verifyItemPhotos(req.auth!.businessId,imageUrls);
   const [record] = await query<Record<string, unknown>>(
     `UPDATE items SET name=$1,description=$2,kind=$3,sku=$4,price=$5,cost=$6,stock_quantity=$7,
-     low_stock_threshold=$8,active=$9,sync_version=sync_version+1,updated_at=now()
+     low_stock_threshold=$8,active=$9,mart_published=COALESCE($12::boolean,mart_published),image_urls=COALESCE($13::jsonb,image_urls),sync_version=sync_version+1,updated_at=now()
      WHERE id=$10 AND business_id=$11 AND deleted_at IS NULL RETURNING *`,
-    [name.trim(), description || null, kind, sku || null, price, cost, kind === "product" ? stockQuantity ?? null : null, lowStockThreshold ?? null, active, req.params.id, req.auth!.businessId],
+    [name.trim(), description || null, kind, sku || null, price, cost, kind === "product" ? stockQuantity ?? null : null, lowStockThreshold ?? null, active, req.params.id, req.auth!.businessId,published,imageUrls===null?null:JSON.stringify(imageUrls)],
   );
   if (!record) throw new HttpError(404, "Item not found");
   await query("INSERT INTO sync_changes (business_id,table_name,record_id,operation) VALUES ($1,'items',$2,'updated')", [req.auth!.businessId, record.id]);
@@ -119,10 +137,14 @@ resourcesRouter.post("/items/bulk", asyncRoute(async (req, res) => {
       if (!name) throw new HttpError(400, `Row ${index + 2}: name is required`);
       if (!["product", "service"].includes(kind)) throw new HttpError(400, `Row ${index + 2}: type must be product or service`);
       if (!Number.isFinite(Number(row.price)) || Number(row.price) < 0) throw new HttpError(400, `Row ${index + 2}: price must be a positive number`);
+      const manager=['owner','admin'].includes(req.auth!.role);
+      const published=publicationChoice(row.publish_to_mart??row.publish_to_store??row.published,manager);
+      if(published&&!manager)throw new HttpError(403,'Only a workspace owner or admin can publish to Oynk Mart.');
+      const imageUrls=photoReferences(row.image_urls??row.imageUrls)??[];await verifyItemPhotos(req.auth!.businessId,imageUrls);
       const result = await client.query(
-        `INSERT INTO items (business_id,name,description,kind,sku,price,cost,stock_quantity,low_stock_threshold)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-        [req.auth!.businessId, name, row.description || null, kind, row.sku || null, Number(row.price || 0), Number(row.cost || 0), kind === "product" && row.stock_quantity !== "" ? Number(row.stock_quantity ?? 0) : null, row.low_stock_threshold !== "" ? Number(row.low_stock_threshold ?? 0) : null],
+        `INSERT INTO items (business_id,name,description,kind,sku,price,cost,stock_quantity,low_stock_threshold,mart_published,image_urls)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb) RETURNING *`,
+        [req.auth!.businessId, name, row.description || null, kind, row.sku || null, Number(row.price || 0), Number(row.cost || 0), kind === "product" && row.stock_quantity !== "" ? Number(row.stock_quantity ?? 0) : null, row.low_stock_threshold !== "" ? Number(row.low_stock_threshold ?? 0) : null,published,JSON.stringify(imageUrls)],
       );
       records.push(result.rows[0]);
       await client.query("INSERT INTO sync_changes (business_id,table_name,record_id,operation) VALUES ($1,'items',$2,'created')", [req.auth!.businessId, result.rows[0].id]);

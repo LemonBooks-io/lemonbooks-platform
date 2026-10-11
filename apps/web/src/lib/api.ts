@@ -10,6 +10,9 @@ export async function api<T>(path: string, options: RequestInit = {}, token?: st
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers },
   });
   const payload = await response.json().catch(() => ({}));
+  if (response.status === 401 && token && typeof window !== "undefined") {
+    window.dispatchEvent(new Event("lemonbooks:session-expired"));
+  }
   if (!response.ok) throw new ApiError(payload.error ?? "Request failed", response.status, payload.code);
   return payload.data as T;
 }
@@ -24,5 +27,6 @@ export function patch<T>(path: string, body: unknown, token?: string) {
 
 export async function postForm<T>(path: string, body: FormData, token?: string): Promise<T> {
   const response = await fetch(`${API_URL}/api/v3${path}`, { method: "POST", body, headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (response.status === 401 && token && typeof window !== "undefined") window.dispatchEvent(new Event("lemonbooks:session-expired"));
   const payload = await response.json().catch(() => ({})); if (!response.ok) throw new ApiError(payload.error ?? "Request failed", response.status, payload.code); return payload.data as T;
 }

@@ -12,6 +12,7 @@ import { paystackRouter, paystackWebhook } from "./routes/paystack.routes";
 import { publicRouter } from "./routes/public.routes";
 import { paymentsRouter } from "./routes/payments.routes";
 import { integrationsRouter } from "./routes/integrations.routes";
+import { martConnectRouter, martRouter, martSourceInventoryRouter, martSourceQuoteRouter } from "./routes/mart.routes";
 import { whatsappRouter } from "./routes/whatsapp.routes";
 import { metaWebhookReceiver, metaWebhookVerification } from "./routes/meta-whatsapp-webhook";
 import { monnifyRouter, monnifyWebhook } from "./routes/monnify.routes";
@@ -23,6 +24,7 @@ export function createApp() {
     if (!origin || env.clientUrls.includes(origin)) return done(null, true);
     return done(new HttpError(403, "This application origin is not allowed"));
   }}));
+  app.use("/api/v3/integrations/oynk-mart/source-inventory/items/bulk",express.json({limit:"2mb",verify(req,_res,buffer){(req as express.Request).rawBody=Buffer.from(buffer);}}));
   app.use(express.json({ limit: "1mb", verify(req, _res, buffer) { (req as express.Request).rawBody = Buffer.from(buffer); } }));
   app.use(express.urlencoded({ extended: false }));
 
@@ -40,6 +42,10 @@ export function createApp() {
   app.use("/api/v3/sync", authenticate, syncRouter);
   app.use("/api/v3/team", authenticate, teamRouter);
   app.use("/api/v3/payment-claims", authenticate, paymentsRouter);
+  app.use("/api/v3/integrations/oynk-mart/source-quote", martSourceQuoteRouter);
+  app.use("/api/v3/integrations/oynk-mart/source-inventory", martSourceInventoryRouter);
+  app.use("/api/v3/integrations/oynk-mart/connect-auth", martConnectRouter);
+  app.use("/api/v3/integrations/oynk-mart", authenticate, martRouter);
   app.use("/api/v3/integrations", authenticate, integrationsRouter);
   app.use("/api/v3/whatsapp", authenticate, whatsappRouter);
   app.use((_req, _res, next) => next(new HttpError(404, "Route not found")));

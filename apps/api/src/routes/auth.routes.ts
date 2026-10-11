@@ -6,6 +6,7 @@ import { authenticate } from "../middleware/auth";
 import { transaction } from "../database/pool";
 import { completeWhatsAppLink, hashWhatsAppLink } from "../services/whatsapp-account-link.service";
 import { env } from "../config";
+import { cancelDeviceLogin, createDeviceLoginChallenge, deviceLoginStatus, finishDeviceLogin } from "../services/whatsapp-device-login.service";
 
 export const authRouter = Router();
 authRouter.get("/whatsapp/entry",(_req,res)=>{const number=env.whatsapp.platformDisplayNumber;res.json({success:true,data:{available:Boolean(number),signInUrl:number?`https://wa.me/${number}?text=LOGIN`:null,signUpUrl:number?`https://wa.me/${number}?text=${encodeURIComponent("GET STARTED")}`:null}});});
@@ -13,6 +14,22 @@ authRouter.post("/whatsapp/code", asyncRoute(async (req,res) => { res.json({succ
 authRouter.post("/whatsapp/verify", asyncRoute(async (req,res) => { res.json({success:true,data:await verifyWhatsAppCode(req.body.whatsappLinkToken,req.body.otp)}); }));
 authRouter.post("/whatsapp/finish", asyncRoute(async (req,res) => { res.json({success:true,data:await finishWhatsAppAuth(req.body)}); }));
 authRouter.post("/whatsapp/magic", asyncRoute(async (req,res) => { res.json({success:true,data:await beginWhatsAppMagicLogin(req.body.whatsappLoginToken)}); }));
+authRouter.post("/whatsapp/device/start", asyncRoute(async (req,res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.status(201).json({success:true,data:await createDeviceLoginChallenge({userAgent:req.get("user-agent"),ip:req.ip})});
+}));
+authRouter.post("/whatsapp/device/status", asyncRoute(async (req,res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({success:true,data:await deviceLoginStatus(req.body.browserToken)});
+}));
+authRouter.post("/whatsapp/device/finish", asyncRoute(async (req,res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({success:true,data:await finishDeviceLogin(req.body.browserToken)});
+}));
+authRouter.post("/whatsapp/device/cancel", asyncRoute(async (req,res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({success:true,data:await cancelDeviceLogin(req.body.browserToken)});
+}));
 
 authRouter.post("/signup", asyncRoute(async (req, res) => {
   const result = await auth.startSignup(req.body);

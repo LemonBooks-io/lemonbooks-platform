@@ -1,9 +1,11 @@
 import crypto from "node:crypto";
 import type { PoolClient } from "pg";
+import { env } from "../config";
 import { query, transaction } from "../database/pool";
 import { HttpError } from "../http";
 import { recordInvoiceSale } from "./inventory.service";
 import { createWhatsAppLink, createWhatsAppLoginLink, unlinkWhatsAppAccount } from "./whatsapp-account-link.service";
+import { handleDeviceLoginCommand, parseDeviceLoginCommand } from "./whatsapp-device-login.service";
 
 export type AssistantAction =
   | { type: "invoice"; customerName: string; itemName: string; quantity: number; unitPrice: number }
@@ -266,7 +268,8 @@ async function executeDraft(client: PoolClient, draft: Record<string, any>) {
       ? (await client.query<Record<string, any>>(`UPDATE items SET stock_quantity=COALESCE(stock_quantity,0)+$1,price=$2,cost=$3,active=true,sync_version=sync_version+1,updated_at=now() WHERE id=$4 RETURNING *`, [action.quantity, action.price, action.cost, existing.id])).rows[0]!
       : (await client.query<Record<string, any>>(`INSERT INTO items(business_id,name,kind,price,cost,stock_quantity) VALUES($1,$2,'product',$3,$4,$5) RETURNING *`, [draft.business_id, action.itemName, action.price, action.cost, action.quantity])).rows[0]!;
     await client.query("INSERT INTO sync_changes(business_id,table_name,record_id,operation) VALUES($1,'items',$2,$3)", [draft.business_id, item.id, existing ? "updated" : "created"]);
-    return { type: "item", id: item.id, message: `${item.name} is saved. Current stock: ${item.stock_quantity}.` };
+    const business = (await client.query<{name:string}>("SELECT name FROM businesses WHERE id=$1",[draft.business_id])).rows[0];
+    return { type: "item", id: item.id, message: `${item.name} is saved to ${business?.name ?? "your workspace"}. Current stock: ${item.stock_quantity}.\n\nOpen Items & inventory: ${env.publicWebUrl}/items` };
   }
   if (action.type === "sale") {
     const { invoice, total, currency } = await createInvoiceRecord(client, draft.business_id, action, true, draft.id);
@@ -335,6 +338,8 @@ export async function handleWhatsAppAssistant(input: AssistantMessageInput): Pro
   const body = clean(input.body, 1200);
   if (!body) return "I received that message, but I need text or a caption to understand the business action.";
   if (/^(stop|unsubscribe|opt\s*out)$/i.test(body)) return null;
+  const deviceLogin = parseDeviceLoginCommand(body);
+  if (deviceLogin) return handleDeviceLoginCommand(input.contactId, deviceLogin);
   const onboarding = (await query<Record<string, any>>("SELECT * FROM whatsapp_onboarding_sessions WHERE contact_id=$1 AND expires_at>now()", [input.contactId]))[0];
   if (onboarding) return continueOnboarding({ ...input, body }, onboarding);
   const context = await activeContext(input.contactId);

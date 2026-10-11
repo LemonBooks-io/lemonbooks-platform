@@ -9,7 +9,8 @@ import { handleDeviceLoginCommand, parseDeviceLoginCommand } from "./whatsapp-de
 
 export type AssistantAction =
   | { type: "invoice"; customerName: string; itemName: string; quantity: number; unitPrice: number }
-  | { type: "inventory"; itemName: string; quantity: number; price: number; cost: number }
+  | { type: "inventory"; itemName: string; quantity: number; price: number; cost: number; description: string }
+  | { type: "customer"; name: string; email: string; phone: string; company: string; address: string }
   | { type: "sale"; customerName: string; itemName: string; quantity: number; unitPrice: number; method: "cash" | "transfer" | "card" | "pos" | "other" }
   | { type: "expense"; description: string; amount: number; category: string; vendorName: string }
   | { type: "payment"; invoiceNumber: string; amount: number; method: "cash" | "transfer"; reference: string };
@@ -29,21 +30,38 @@ export type AssistantMessageInput = {
 };
 
 const usage = {
-  invoice: "INVOICE | customer | item | quantity | unit price",
-  inventory: "ADD ITEM | item | quantity | selling price | cost (optional)",
-  sale: "SALE | customer | item | quantity | unit price | cash/transfer/card/POS",
-  expense: "EXPENSE | description | amount | category | vendor (optional)",
-  payment: "PAYMENT | invoice number | amount | cash/transfer | reference (optional)",
+  invoice: "INVOICE\nCustomer: Ada\nItem: Rice\nQuantity: 2\nPrice: 45000",
+  inventory: "ADD ITEM\nName: Rice\nQuantity: 10\nPrice: 45000\nCost: 40000\nDescription: 50kg bag (optional)",
+  customer: "ADD CUSTOMER\nName: Ada Okafor\nPhone: 08012345678\nEmail: ada@example.com (optional)\nCompany: Ada Stores (optional)\nAddress: Ikeja, Lagos (optional)",
+  sale: "SALE\nCustomer: Ada\nItem: Rice\nQuantity: 2\nPrice: 45000\nMethod: POS",
+  expense: "EXPENSE\nDescription: Generator fuel\nAmount: 25000\nCategory: Utilities\nVendor: Total Station (optional)",
+  payment: "PAYMENT\nInvoice: INV-00001\nAmount: 25000\nMethod: transfer\nReference: NIP-123 (optional)",
 } as const;
 
 function clean(value: unknown, max = 180) {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+function cleanMessageBody(value: unknown, max = 1200) {
+  return String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map(line => line.replace(/[^\S\n]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, max);
+}
+
 function money(value: string) {
-  const normalized = value.replace(/[₦,$£€\s]/g, "").replace(/ngn|usd|gbp|eur/gi, "").replace(/,/g, "");
+  const normalized = value.replace(/[₦#,$£€\s]/g, "").replace(/ngn|usd|gbp|eur/gi, "").replace(/,/g, "");
   const number = Number(normalized);
   return Number.isFinite(number) && number > 0 ? Math.round(number * 100) / 100 : NaN;
+}
+
+function nonNegativeMoney(value:string){
+  const normalized=value.replace(/[₦#,$£€\s]/g,"").replace(/ngn|usd|gbp|eur/gi,"").replace(/,/g,"");
+  const number=Number(normalized);return Number.isFinite(number)&&number>=0?Math.round(number*100)/100:NaN;
 }
 
 function quantity(value: string) {
@@ -52,23 +70,81 @@ function quantity(value: string) {
 }
 
 function intentFor(command: string): AssistantAction["type"] | undefined {
-  if (/^(invoice|create invoice)$/.test(command)) return "invoice";
-  if (/^(add item|inventory|stock|restock)$/.test(command)) return "inventory";
-  if (/^(sale|record sale)$/.test(command)) return "sale";
-  if (/^(expense|record expense)$/.test(command)) return "expense";
-  if (/^(payment|record payment)$/.test(command)) return "payment";
+  const normalized=clean(command).toLowerCase().replace(/[._-]+/g," ").replace(/\s+/g," ");
+  if (/^(invoice|create invoice|inv)$/.test(normalized)) return "invoice";
+  if (/^(add item|inventory|stock|restock|ai)$/.test(normalized)) return "inventory";
+  if (/^(add customer|customer|ac)$/.test(normalized)) return "customer";
+  if (/^(sale|record sale|s)$/.test(normalized)) return "sale";
+  if (/^(expense|record expense|ex)$/.test(normalized)) return "expense";
+  if (/^(payment|record payment|pay)$/.test(normalized)) return "payment";
   return undefined;
+}
+
+const fieldAliases: Record<AssistantAction["type"],Record<string,string>> = {
+  inventory:{n:"name",name:"name",item:"name",q:"quantity",qty:"quantity",quantity:"quantity",p:"price",price:"price","selling price":"price",c:"cost",cost:"cost",d:"description",desc:"description",description:"description"},
+  customer:{n:"name",name:"name",e:"email",email:"email",p:"phone",ph:"phone",phone:"phone",c:"company",co:"company",company:"company",a:"address",address:"address"},
+  invoice:{c:"customer",customer:"customer",i:"item",item:"item",q:"quantity",qty:"quantity",quantity:"quantity",p:"price",price:"price","unit price":"price"},
+  sale:{c:"customer",customer:"customer",i:"item",item:"item",q:"quantity",qty:"quantity",quantity:"quantity",p:"price",price:"price","unit price":"price",m:"method",method:"method"},
+  expense:{d:"description",description:"description",a:"amount",amount:"amount",c:"category",category:"category",v:"vendor",vendor:"vendor"},
+  payment:{i:"invoice",invoice:"invoice","invoice number":"invoice",a:"amount",amount:"amount",m:"method",method:"method",r:"reference",ref:"reference",reference:"reference"},
+};
+
+function labeledFields(body:string,intent:AssistantAction["type"]){
+  const lines=body.split(/\r?\n/).map(line=>line.trim()).filter(Boolean).slice(1);
+  if(!lines.length)return null;
+  const fields:Record<string,string>={};
+  for(const line of lines){
+    const match=line.match(/^([^:]+?)\s*:\s*(.*)$/)??line.match(/^(.+?)\s+-\s+(.*)$/);
+    if(!match)return null;
+    const rawKey=clean(match[1]).toLowerCase().replace(/[._-]+/g," ").replace(/\s+/g," ");
+    const key=fieldAliases[intent][rawKey];
+    if(!key||fields[key]!==undefined)return null;
+    fields[key]=clean(match[2],500);
+  }
+  return fields;
 }
 
 export function parseAssistantAction(body: string): AssistantActionParse {
   const parts = body.split("|").map(part => clean(part));
+  const firstLine=body.split(/\r?\n/).find(line=>line.trim())??"";
   const first = parts[0]!.toLowerCase();
-  const intent = intentFor(first) ?? (/\binvoice\b/i.test(body) ? "invoice"
+  const intent = intentFor(firstLine) ?? intentFor(first) ?? (/\binvoice\b/i.test(body) ? "invoice"
     : /\b(?:add item|inventory|restock)\b/i.test(body) ? "inventory"
+    : /\badd customer\b/i.test(body) ? "customer"
     : /\b(?:record sale|sale)\b/i.test(body) ? "sale"
     : /\b(?:record expense|expense)\b/i.test(body) ? "expense"
     : /\b(?:record payment|payment)\b/i.test(body) ? "payment" : undefined);
   if (!intent) return { kind: "none" };
+  const fields=labeledFields(body,intent);
+  if(fields){
+    if(intent==="inventory"){
+      const qty=quantity(fields.quantity??""),price=money(fields.price??""),cost=fields.cost===undefined?0:nonNegativeMoney(fields.cost);
+      if(!fields.name||!Number.isFinite(qty)||!Number.isFinite(price)||!Number.isFinite(cost))return{kind:"incomplete",intent,usage:usage.inventory};
+      return{kind:"action",action:{type:intent,itemName:fields.name,quantity:qty,price,cost,description:fields.description??""}};
+    }
+    if(intent==="customer"){
+      if(!fields.name)return{kind:"incomplete",intent,usage:usage.customer};
+      const email=(fields.email??"").toLowerCase();if(email&&!/^\S+@\S+\.\S+$/.test(email))return{kind:"incomplete",intent,usage:usage.customer};
+      return{kind:"action",action:{type:intent,name:fields.name,email,phone:fields.phone??"",company:fields.company??"",address:fields.address??""}};
+    }
+    if(intent==="invoice"){
+      const qty=quantity(fields.quantity??""),unitPrice=money(fields.price??"");
+      if(!fields.customer||!fields.item||!Number.isFinite(qty)||!Number.isFinite(unitPrice))return{kind:"incomplete",intent,usage:usage.invoice};
+      return{kind:"action",action:{type:intent,customerName:fields.customer,itemName:fields.item,quantity:qty,unitPrice}};
+    }
+    if(intent==="sale"){
+      const qty=quantity(fields.quantity??""),unitPrice=money(fields.price??""),method=clean(fields.method).toLowerCase();
+      if(!fields.customer||!fields.item||!Number.isFinite(qty)||!Number.isFinite(unitPrice)||!["cash","transfer","card","pos","other"].includes(method))return{kind:"incomplete",intent,usage:usage.sale};
+      return{kind:"action",action:{type:intent,customerName:fields.customer,itemName:fields.item,quantity:qty,unitPrice,method:method as "cash"|"transfer"|"card"|"pos"|"other"}};
+    }
+    if(intent==="expense"){
+      const amount=money(fields.amount??"");if(!fields.description||!Number.isFinite(amount))return{kind:"incomplete",intent,usage:usage.expense};
+      return{kind:"action",action:{type:intent,description:fields.description,amount,category:fields.category??"uncategorized",vendorName:fields.vendor??""}};
+    }
+    const amount=money(fields.amount??""),method=clean(fields.method).toLowerCase();
+    if(!fields.invoice||!Number.isFinite(amount)||!["cash","transfer"].includes(method))return{kind:"incomplete",intent,usage:usage.payment};
+    return{kind:"action",action:{type:"payment",invoiceNumber:fields.invoice,amount,method:method as "cash"|"transfer",reference:fields.reference??""}};
+  }
   if (parts.length === 1) return { kind: "incomplete", intent, usage: usage[intent] };
   if (intent === "invoice") {
     const [, customerName, itemName, quantityText, unitPriceText] = parts;
@@ -78,10 +154,11 @@ export function parseAssistantAction(body: string): AssistantActionParse {
   }
   if (intent === "inventory") {
     const [, itemName, quantityText, priceText, costText = "0"] = parts;
-    const qty = quantity(quantityText ?? ""), price = money(priceText ?? ""), parsedCost = costText === "0" ? 0 : money(costText);
+    const qty = quantity(quantityText ?? ""), price = money(priceText ?? ""), parsedCost = nonNegativeMoney(costText);
     if (!itemName || !Number.isFinite(qty) || !Number.isFinite(price) || !Number.isFinite(parsedCost) || parsedCost < 0) return { kind: "incomplete", intent, usage: usage.inventory };
-    return { kind: "action", action: { type: intent, itemName, quantity: qty, price, cost: parsedCost } };
+    return { kind: "action", action: { type: intent, itemName, quantity: qty, price, cost: parsedCost, description:"" } };
   }
+  if(intent==="customer")return {kind:"incomplete",intent,usage:usage.customer};
   if (intent === "sale") {
     const [, customerName, itemName, quantityText, unitPriceText, methodText] = parts;
     const qty = quantity(quantityText ?? ""), unitPrice = money(unitPriceText ?? "");
@@ -108,7 +185,8 @@ function formatMoney(value: number, currency = "NGN") {
 
 function actionSummary(action: AssistantAction, currency = "NGN") {
   if (action.type === "invoice") return `Invoice draft\nCustomer: ${action.customerName}\nItem: ${action.itemName}\nQuantity: ${action.quantity}\nUnit price: ${formatMoney(action.unitPrice, currency)}\nTotal: ${formatMoney(action.quantity * action.unitPrice, currency)}`;
-  if (action.type === "inventory") return `Inventory draft\nItem: ${action.itemName}\nAdd quantity: ${action.quantity}\nSelling price: ${formatMoney(action.price, currency)}\nCost: ${formatMoney(action.cost, currency)}`;
+  if (action.type === "inventory") return `Inventory\nItem: ${action.itemName}\nAdd quantity: ${action.quantity}\nSelling price: ${formatMoney(action.price, currency)}\nCost: ${formatMoney(action.cost, currency)}${action.description?`\nDescription: ${action.description}`:""}`;
+  if (action.type === "customer") return `Customer\nName: ${action.name}${action.phone?`\nPhone: ${action.phone}`:""}${action.email?`\nEmail: ${action.email}`:""}`;
   if (action.type === "sale") return `Sale draft\nCustomer: ${action.customerName}\nItem: ${action.itemName}\nQuantity: ${action.quantity}\nTotal: ${formatMoney(action.quantity * action.unitPrice, currency)}\nPayment: ${action.method.toUpperCase()}`;
   if (action.type === "expense") return `Expense draft\nDescription: ${action.description}\nAmount: ${formatMoney(action.amount, currency)}\nCategory: ${action.category}${action.vendorName ? `\nVendor: ${action.vendorName}` : ""}`;
   return `Payment report draft\nInvoice: ${action.invoiceNumber}\nAmount: ${formatMoney(action.amount, currency)}\nMethod: ${action.method.toUpperCase()}${action.reference ? `\nReference: ${action.reference}` : ""}`;
@@ -235,6 +313,34 @@ async function ensureItem(client: PoolClient, businessId: string, name: string, 
   return created;
 }
 
+async function saveInventoryRecord(client:PoolClient,businessId:string,action:Extract<AssistantAction,{type:"inventory"}>){
+  const existing=(await client.query<Record<string,any>>("SELECT * FROM items WHERE business_id=$1 AND lower(name)=lower($2) AND deleted_at IS NULL FOR UPDATE",[businessId,action.itemName])).rows[0];
+  const item=existing
+    ?(await client.query<Record<string,any>>(`UPDATE items SET stock_quantity=COALESCE(stock_quantity,0)+$1,price=$2,cost=$3,description=CASE WHEN $4='' THEN description ELSE $4 END,active=true,sync_version=sync_version+1,updated_at=now() WHERE id=$5 RETURNING *`,[action.quantity,action.price,action.cost,action.description,existing.id])).rows[0]!
+    :(await client.query<Record<string,any>>(`INSERT INTO items(business_id,name,description,kind,price,cost,stock_quantity) VALUES($1,$2,$3,'product',$4,$5,$6) RETURNING *`,[businessId,action.itemName,action.description||null,action.price,action.cost,action.quantity])).rows[0]!;
+  await client.query("INSERT INTO sync_changes(business_id,table_name,record_id,operation) VALUES($1,'items',$2,$3)",[businessId,item.id,existing?"updated":"created"]);
+  return item;
+}
+
+async function saveImmediateAction(input:AssistantMessageInput,context:Record<string,any>,action:Extract<AssistantAction,{type:"inventory"|"customer"}>){
+  return transaction(async client=>{
+    if(action.type==="inventory"){
+      const item=await saveInventoryRecord(client,context.business_id,action);
+      await client.query(`INSERT INTO integration_audit_log(business_id,actor_type,actor_id,action,resource_type,resource_id,after_summary)
+        VALUES($1,'whatsapp_contact',$2,'whatsapp.inventory_saved','item',$3,$4)`,[context.business_id,input.contactId,item.id,JSON.stringify({sourceMessageId:input.sourceMessageId,quantity:action.quantity})]);
+      return `${item.name} is saved to ${context.business_name}. Current stock: ${item.stock_quantity}.\n\nOpen Items & inventory: ${env.publicWebUrl}/items`;
+    }
+    const duplicate=(await client.query<Record<string,any>>(`SELECT * FROM clients WHERE business_id=$1 AND deleted_at IS NULL AND
+      (($2<>'' AND lower(email)=lower($2)) OR ($3<>'' AND regexp_replace(COALESCE(phone,''),'[^0-9]','','g')=regexp_replace($3,'[^0-9]','','g')) OR ($2='' AND $3='' AND lower(name)=lower($4))) ORDER BY created_at LIMIT 1`,[context.business_id,action.email,action.phone,action.name])).rows[0];
+    if(duplicate)return `${duplicate.name} is already in ${context.business_name}.\n\nOpen Customers: ${env.publicWebUrl}/clients`;
+    const customer=(await client.query<Record<string,any>>(`INSERT INTO clients(business_id,name,email,phone,company,address) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,[context.business_id,action.name,action.email||null,action.phone||null,action.company||null,action.address||null])).rows[0]!;
+    await client.query("INSERT INTO sync_changes(business_id,table_name,record_id,operation) VALUES($1,'clients',$2,'created')",[context.business_id,customer.id]);
+    await client.query(`INSERT INTO integration_audit_log(business_id,actor_type,actor_id,action,resource_type,resource_id,after_summary)
+      VALUES($1,'whatsapp_contact',$2,'whatsapp.customer_saved','client',$3,$4)`,[context.business_id,input.contactId,customer.id,JSON.stringify({sourceMessageId:input.sourceMessageId})]);
+    return `${customer.name} is saved to ${context.business_name}.\n\nOpen Customers: ${env.publicWebUrl}/clients`;
+  });
+}
+
 async function invoiceNumber(client: PoolClient, businessId: string) {
   await client.query("SELECT id FROM businesses WHERE id=$1 FOR UPDATE", [businessId]);
   const row = (await client.query<{ next: string }>(`SELECT ('INV-' || lpad((COALESCE(MAX(CASE WHEN number ~ '^INV-[0-9]+$' THEN substring(number from 5)::bigint END),0)+1)::text,5,'0')) AS next FROM invoices WHERE business_id=$1`, [businessId])).rows[0];
@@ -263,14 +369,11 @@ async function executeDraft(client: PoolClient, draft: Record<string, any>) {
     return { type: "invoice", id: invoice.id, message: `Invoice ${invoice.number} was created as a draft.` };
   }
   if (action.type === "inventory") {
-    const existing = (await client.query<Record<string, any>>("SELECT * FROM items WHERE business_id=$1 AND lower(name)=lower($2) AND deleted_at IS NULL FOR UPDATE", [draft.business_id, action.itemName])).rows[0];
-    const item = existing
-      ? (await client.query<Record<string, any>>(`UPDATE items SET stock_quantity=COALESCE(stock_quantity,0)+$1,price=$2,cost=$3,active=true,sync_version=sync_version+1,updated_at=now() WHERE id=$4 RETURNING *`, [action.quantity, action.price, action.cost, existing.id])).rows[0]!
-      : (await client.query<Record<string, any>>(`INSERT INTO items(business_id,name,kind,price,cost,stock_quantity) VALUES($1,$2,'product',$3,$4,$5) RETURNING *`, [draft.business_id, action.itemName, action.price, action.cost, action.quantity])).rows[0]!;
-    await client.query("INSERT INTO sync_changes(business_id,table_name,record_id,operation) VALUES($1,'items',$2,$3)", [draft.business_id, item.id, existing ? "updated" : "created"]);
+    const item=await saveInventoryRecord(client,draft.business_id,action);
     const business = (await client.query<{name:string}>("SELECT name FROM businesses WHERE id=$1",[draft.business_id])).rows[0];
     return { type: "item", id: item.id, message: `${item.name} is saved to ${business?.name ?? "your workspace"}. Current stock: ${item.stock_quantity}.\n\nOpen Items & inventory: ${env.publicWebUrl}/items` };
   }
+  if(action.type==="customer")throw new HttpError(409,"Customers are saved immediately and cannot be confirmed from a draft.");
   if (action.type === "sale") {
     const { invoice, total, currency } = await createInvoiceRecord(client, draft.business_id, action, true, draft.id);
     await client.query(`INSERT INTO payments(business_id,invoice_id,amount,currency,method,reference,status,group_reference)
@@ -331,11 +434,11 @@ async function todaySummary(context: Record<string, any>) {
 }
 
 function help(workspace?: string) {
-  return `${workspace ? `Workspace: ${workspace}\n\n` : ""}What you can do\n\n• Create invoice\n${usage.invoice}\n\n• Add stock\n${usage.inventory}\n\n• Record a sale\n${usage.sale}\n\n• Record an expense\n${usage.expense}\n\n• Report a payment\n${usage.payment}\n\nReply TODAY for a summary, BUSINESSES to switch workspace, LOGIN to open the portal, or UNLINK to disconnect.`;
+  return `${workspace ? `Workspace: ${workspace}\n\n` : ""}What you can do\n\n• Add an item immediately\n${usage.inventory}\n\n• Add a customer immediately\n${usage.customer}\n\n• Create invoice\n${usage.invoice}\n\n• Record a sale\n${usage.sale}\n\n• Record an expense\n${usage.expense}\n\n• Report a payment\n${usage.payment}\n\nField labels can be in any order. Shortcuts include AI (Add Item), AC (Add Customer), N (Name), Q (Quantity), P (Price), C (Cost), and D (Description).\n\nReply TODAY for a summary, BUSINESSES to switch workspace, LOGIN to open the portal, or UNLINK to disconnect.`;
 }
 
 export async function handleWhatsAppAssistant(input: AssistantMessageInput): Promise<string | null> {
-  const body = clean(input.body, 1200);
+  const body = cleanMessageBody(input.body, 1200);
   if (!body) return "I received that message, but I need text or a caption to understand the business action.";
   if (/^(stop|unsubscribe|opt\s*out)$/i.test(body)) return null;
   const deviceLogin = parseDeviceLoginCommand(body);
@@ -366,7 +469,12 @@ export async function handleWhatsAppAssistant(input: AssistantMessageInput): Pro
   if (/^(cancel|discard|no)$/i.test(body)) return cancelDraft(input.contactId);
   if (/^(today|today's summary|todays summary|summary|sales today)$/i.test(body)) return todaySummary(context);
   const parsed = parseAssistantAction(body);
-  if (parsed.kind === "incomplete") return `I can prepare that. Send it like this:\n\n${parsed.usage}\n\nI’ll show you a draft before anything is saved.`;
-  if (parsed.kind === "action") return createDraft(input, context, parsed.action);
+  if (parsed.kind === "incomplete") {
+    const savesImmediately = parsed.intent === "inventory" || parsed.intent === "customer";
+    return `I need a few more details. Send it like this:\n\n${parsed.usage}\n\n${savesImmediately ? "I’ll save it to this workspace once the required details are complete." : "I’ll show you a draft before anything is saved."}`;
+  }
+  if (parsed.kind === "action") return parsed.action.type==="inventory"||parsed.action.type==="customer"
+    ? saveImmediateAction(input,context,parsed.action)
+    : createDraft(input, context, parsed.action);
   return `I didn’t understand that request. Reply HELP to see the actions I can handle, or TODAY for your business summary.`;
 }

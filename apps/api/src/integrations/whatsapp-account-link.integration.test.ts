@@ -200,14 +200,19 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
     assert.ok(directBusiness.id);
     assert.equal((await query("SELECT user_id FROM whatsapp_auth_identities WHERE phone='+15555550200'")).length,1);
 
-    await inbound("ADD ITEM | Golden Rice | 10 | 45000 | 40000", "direct-stock", directPhone);
-    assert.match(sent.at(-1)!, /Inventory draft/);
-    assert.equal((await query("SELECT id FROM items WHERE business_id=$1",[directBusiness.id])).length,0,"drafts do not mutate inventory");
-    await inbound("CONFIRM", "direct-stock-confirm", directPhone);
-    assert.match(sent.at(-1)!, /Current stock: 10/);
-    assert.equal((await query("SELECT id FROM items WHERE business_id=$1",[directBusiness.id])).length,1);
+    await inbound("AI\nDescription: Premium long grain\nPrice: 45000\nN: Golden Rice\nCost: 40000\nQ: 10", "direct-stock", directPhone);
+    assert.match(sent.at(-1)!, /saved to Direct Market/);
+    const directItems=await query<{description:string;stock_quantity:string}>("SELECT description,stock_quantity FROM items WHERE business_id=$1",[directBusiness.id]);
+    assert.equal(directItems.length,1,"items save immediately without a draft");
+    assert.equal(directItems[0]!.description,"Premium long grain");
+    assert.equal(Number(directItems[0]!.stock_quantity),10);
+    assert.equal((await query("SELECT id FROM whatsapp_action_drafts WHERE business_id=$1 AND action_type='inventory'",[directBusiness.id])).length,0);
 
-    await inbound("INVOICE | Kemi | Golden Rice | 2 | 45000", "direct-invoice", directPhone);
+    await inbound("AC\nPhone: 08012345678\nName: Kemi Stores\nAddress: Yaba, Lagos", "direct-customer", directPhone);
+    assert.match(sent.at(-1)!, /Kemi Stores is saved to Direct Market/);
+    assert.equal((await query("SELECT id FROM clients WHERE business_id=$1 AND name='Kemi Stores'",[directBusiness.id])).length,1,"customers save immediately without a draft");
+
+    await inbound("INVOICE\nQuantity: 2\nCustomer: Kemi\nPrice: 45000\nItem: Golden Rice", "direct-invoice", directPhone);
     assert.match(sent.at(-1)!, /Invoice draft/);
     await inbound("CONFIRM", "direct-invoice-confirm", directPhone);
     assert.match(sent.at(-1)!, /was created as a draft/);
